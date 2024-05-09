@@ -29,6 +29,7 @@ except:
     print("No laspy")
 from utils.sh_utils import SH2RGB
 from scene.gaussian_model import BasicPointCloud
+import trimesh
 import cv2
 
 
@@ -44,12 +45,30 @@ class CameraInfo(NamedTuple):
     width: int
     height: int
 
+class CameraInfo2(NamedTuple):
+    uid: int
+    R: np.array
+    T: np.array
+    FovY: np.array
+    FovX: np.array
+    image_path: str
+    image_name: str
+    width: int
+    height: int
+
+
 class SceneInfo(NamedTuple):
     point_cloud: BasicPointCloud
     train_cameras: list
     test_cameras: list
     nerf_normalization: dict
     ply_path: str
+
+# SceneInfo class for Mesh instead of SFM point cloud
+class SceneInfo2(NamedTuple):
+    train_cameras: list
+    test_cameras: list
+    nerf_normalization: dict
 
 def getNerfppNorm(cam_info):
     def get_center_and_diag(cam_centers):
@@ -74,7 +93,7 @@ def getNerfppNorm(cam_info):
 
     return {"translate": translate, "radius": radius}
 
-def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
+def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder, ds_type=None):
     cam_infos = []
     for idx, key in enumerate(cam_extrinsics):
         sys.stdout.write('\r')
@@ -106,14 +125,17 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
         
         # print(f'FovX: {FovX}, FovY: {FovY}')
 
-        image_path = os.path.join(images_folder, os.path.basename(extr.name))
+        if ds_type == 'Mega':
+            image_path = os.path.join(images_folder, extr.name)
+        else:
+            image_path = os.path.join(images_folder, os.path.basename(extr.name))
         image_name = os.path.basename(image_path).split(".")[0]
-        image = Image.open(image_path)
-
+        # image = Image.open(image_path)
         # print(f'image: {image.size}')
-
-        cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
+        cam_info = CameraInfo2(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, 
                               image_path=image_path, image_name=image_name, width=width, height=height)
+        # cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
+        #                       image_path=image_path, image_name=image_name, width=width, height=height)
         cam_infos.append(cam_info)
     sys.stdout.write('\n')
     return cam_infos
@@ -205,6 +227,196 @@ def readColmapSceneInfo(path, images, eval, lod, llffhold=8):
                            nerf_normalization=nerf_normalization,
                            ply_path=ply_path)
     return scene_info
+
+
+def readColmapMegaSceneInfo(path, split_folder, eval):
+    if split_folder == "":
+        folder_name = "colmap_aligned"
+    else:
+        folder_name = split_folder # "colmap_aligned/0"
+    try:
+        cameras_extrinsic_file = os.path.join(path, folder_name, "images.bin")
+        cameras_intrinsic_file = os.path.join(path, folder_name, "cameras.bin")
+        cam_extrinsics = read_extrinsics_binary(cameras_extrinsic_file)
+        cam_intrinsics = read_intrinsics_binary(cameras_intrinsic_file)
+    except:
+        cameras_extrinsic_file = os.path.join(path, folder_name, "images.txt")
+        cameras_intrinsic_file = os.path.join(path, folder_name, "cameras.txt")
+        cam_extrinsics = read_extrinsics_text(cameras_extrinsic_file)
+        cam_intrinsics = read_intrinsics_text(cameras_intrinsic_file)
+    
+    cam_infos_unsorted = readColmapCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, images_folder=path, ds_type='Mega')
+    cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
+
+    if eval:
+        train_cam_infos = [c for c in cam_infos if c.image_path.split('/')[-3] == "train"]
+        test_cam_infos = [c for c in cam_infos if c.image_path.split('/')[-3] == "val"]
+    else:
+        train_cam_infos = cam_infos
+        test_cam_infos = []
+    
+    assert len(cam_infos) == len(train_cam_infos) + len(test_cam_infos)
+
+    nerf_normalization = getNerfppNorm(train_cam_infos)
+
+    ply_path = os.path.join(path, folder_name, "points3D.ply")
+    bin_path = os.path.join(path, folder_name, "points3D.bin")
+    txt_path = os.path.join(path, folder_name, "points3D.txt")
+    if not os.path.exists(ply_path):
+        print("Converting point3d.bin to .ply, will happen only the first time you open the scene.")
+        try:
+            xyz, rgb, _ = read_points3D_binary(bin_path)
+        except:
+            xyz, rgb, _ = read_points3D_text(txt_path)
+        storePly(ply_path, xyz, rgb)
+    # try:
+    print(f'start fetching data from ply file')
+    pcd = fetchPly(ply_path)
+
+    scene_info = SceneInfo(point_cloud=pcd,
+                           train_cameras=train_cam_infos,
+                           test_cameras=test_cam_infos,
+                           nerf_normalization=nerf_normalization,
+                           ply_path=ply_path)
+    return scene_info
+
+def readColmapMeshMegaSceneInfo(path, split_folder, eval):
+    if split_folder == "":
+        folder_name = "colmap_aligned"
+    else:
+        folder_name = split_folder # "colmap_aligned/0"
+
+    try:
+        cameras_extrinsic_file = os.path.join(path, folder_name, "images.bin")
+        cameras_intrinsic_file = os.path.join(path, folder_name, "cameras.bin")
+        cam_extrinsics = read_extrinsics_binary(cameras_extrinsic_file)
+        cam_intrinsics = read_intrinsics_binary(cameras_intrinsic_file)
+    except:
+        cameras_extrinsic_file = os.path.join(path, folder_name, "images.txt")
+        cameras_intrinsic_file = os.path.join(path, folder_name, "cameras.txt")
+        cam_extrinsics = read_extrinsics_text(cameras_extrinsic_file)
+        cam_intrinsics = read_intrinsics_text(cameras_intrinsic_file)
+    
+    cam_infos_unsorted = readColmapCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, images_folder=path, ds_type='Mega')
+    cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
+
+    if eval:
+        train_cam_infos = [c for c in cam_infos if c.image_path.split('/')[-3] == "train"]
+        test_cam_infos = [c for c in cam_infos if c.image_path.split('/')[-3] == "val"]
+    else:
+        train_cam_infos = cam_infos
+        test_cam_infos = []
+    
+    assert len(cam_infos) == len(train_cam_infos) + len(test_cam_infos)
+
+    nerf_normalization = getNerfppNorm(train_cam_infos)
+
+    scene_info = SceneInfo2(train_cameras=train_cam_infos,
+                           test_cameras=test_cam_infos,
+                           nerf_normalization=nerf_normalization)
+
+    # mesh_file = os.path.join(split_folder, "mesh_deci0.75.ply")
+    # ply_path = os.path.join(path, "points3d_0_tmp.ply")
+
+    # assert os.path.exists(f'{path}/{mesh_file}'), f'{path}/{mesh_file} does not exist'
+    # mesh_scene = trimesh.load(f'{path}/{mesh_file}', force='mesh')
+    # vertices = mesh_scene.vertices
+    # # faces = mesh_scene.faces
+    # # triangles = torch.tensor(mesh_scene.triangles).float()  # equal vertices[faces]
+
+    # num_pts = vertices.shape[0]
+    # shs = np.random.random((num_pts, 3)) / 255.0
+
+    # storePly(ply_path, vertices, SH2RGB(shs) * 255)
+    # pcd = fetchPly(ply_path)
+    # scene_info = SceneInfo(point_cloud=pcd,
+    #                     train_cameras=train_cam_infos,
+    #                     test_cameras=test_cam_infos,
+    #                     nerf_normalization=nerf_normalization,
+    #                     ply_path=ply_path)
+    return scene_info
+
+def readColmapOkutamaSceneInfo(path, images, eval, llffhold=8):
+    folder_name = "colmap_aligned"
+    try:
+        cameras_extrinsic_file = os.path.join(path, folder_name, "images.bin")
+        cameras_intrinsic_file = os.path.join(path, folder_name, "cameras.bin")
+        cam_extrinsics = read_extrinsics_binary(cameras_extrinsic_file)
+        cam_intrinsics = read_intrinsics_binary(cameras_intrinsic_file)
+    except:
+        cameras_extrinsic_file = os.path.join(path, folder_name, "images.txt")
+        cameras_intrinsic_file = os.path.join(path, folder_name, "cameras.txt")
+        cam_extrinsics = read_extrinsics_text(cameras_extrinsic_file)
+        cam_intrinsics = read_intrinsics_text(cameras_intrinsic_file)
+
+    reading_dir = "images" if images == None else images
+    cam_infos_unsorted = readColmapCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, images_folder=os.path.join(path, reading_dir))
+    cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
+
+    if eval:
+        train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
+        test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold == 0]
+    else:
+        train_cam_infos = cam_infos
+        test_cam_infos = []
+
+    nerf_normalization = getNerfppNorm(train_cam_infos)
+
+    ply_path = os.path.join(path, folder_name, "points3D.ply")
+    bin_path = os.path.join(path, folder_name, "points3D.bin")
+    txt_path = os.path.join(path, folder_name, "points3D.txt")
+    if not os.path.exists(ply_path):
+        print("Converting point3d.bin to .ply, will happen only the first time you open the scene.")
+        try:
+            xyz, rgb, _ = read_points3D_binary(bin_path)
+        except:
+            xyz, rgb, _ = read_points3D_text(txt_path)
+        storePly(ply_path, xyz, rgb)
+    # try:
+    print(f'start fetching data from ply file')
+    pcd = fetchPly(ply_path)
+
+    scene_info = SceneInfo(point_cloud=pcd,
+                           train_cameras=train_cam_infos,
+                           test_cameras=test_cam_infos,
+                           nerf_normalization=nerf_normalization,
+                           ply_path=ply_path)
+    return scene_info
+
+
+
+def readColmapMeshOkutamaSceneInfo(path, images, eval, llffhold=8):
+    try:
+        cameras_extrinsic_file = os.path.join(path, "colmap_aligned", "images.bin")
+        cameras_intrinsic_file = os.path.join(path, "colmap_aligned", "cameras.bin")
+        cam_extrinsics = read_extrinsics_binary(cameras_extrinsic_file)
+        cam_intrinsics = read_intrinsics_binary(cameras_intrinsic_file)
+    except:
+        cameras_extrinsic_file = os.path.join(path, "colmap_aligned", "images.txt")
+        cameras_intrinsic_file = os.path.join(path, "colmap_aligned", "cameras.txt")
+        cam_extrinsics = read_extrinsics_text(cameras_extrinsic_file)
+        cam_intrinsics = read_intrinsics_text(cameras_intrinsic_file)
+    
+    reading_dir = "images" if images == None else images
+    cam_infos_unsorted = readColmapCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, images_folder=os.path.join(path, reading_dir))
+    cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
+
+    if eval:
+        train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
+        test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold == 0]
+    else:
+        train_cam_infos = cam_infos
+        test_cam_infos = []
+
+    assert len(cam_infos) == len(train_cam_infos) + len(test_cam_infos)
+
+    nerf_normalization = getNerfppNorm(train_cam_infos)
+
+    scene_info = SceneInfo2(train_cameras=train_cam_infos,
+                           test_cameras=test_cam_infos,
+                           nerf_normalization=nerf_normalization)
+    return scene_info
+
 
 def readCamerasFromTransforms(path, transformsfile, white_background, extension=".png", is_debug=False, undistorted=False):
     cam_infos = []
@@ -331,5 +543,9 @@ def readNerfSyntheticInfo(path, white_background, eval, extension=".png", ply_pa
 
 sceneLoadTypeCallbacks = {
     "Colmap": readColmapSceneInfo,
+    "Mega": readColmapMegaSceneInfo,
+    "MegaMesh": readColmapMeshMegaSceneInfo,
+    "Okutama": readColmapOkutamaSceneInfo,
+    "OkutamaMesh":readColmapMeshOkutamaSceneInfo,
     "Blender": readNerfSyntheticInfo,
 }

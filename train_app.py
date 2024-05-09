@@ -485,7 +485,6 @@ if __name__ == "__main__":
     parser.add_argument("--gs_type", type=str, default = None) # gs_mesh | gs_multi_mesh
     parser.add_argument("--num_splats", nargs="+", type=int, default = [1]) 
     parser.add_argument("--meshes", nargs="+", type=str, default=[])
-
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
 
@@ -551,14 +550,8 @@ if __name__ == "__main__":
 
     lp_extract = lp.extract(args)
 
-    if args.model_name == 'ScaffoldGS':
-        from scene.gaussian_model import GaussianModel
-        gaussians = GaussianModel(lp_extract.feat_dim, lp_extract.n_offsets, lp_extract.voxel_size, lp_extract.update_depth, \
-                                lp_extract.update_init_factor, lp_extract.update_hierachy_factor, lp_extract.use_feat_bank, \
-                                lp_extract.appearance_dim, lp_extract.ratio, lp_extract.add_opacity_dist, lp_extract.add_cov_dist, \
-                                lp_extract.add_color_dist)
-    elif args.model_name == 'ScaffoldMeshGS':
-        from scene.gaussian_mesh_model import GaussianModel
+    if args.model_name == 'VastScaffoldMeshGS':
+        from scene.vast_gaussian_model import GaussianModel
         gaussians = GaussianModel(lp_extract.feat_dim, lp_extract.n_offsets, lp_extract.voxel_size, lp_extract.update_depth, \
                                 lp_extract.update_init_factor, lp_extract.update_hierachy_factor, lp_extract.use_feat_bank, \
                                 lp_extract.appearance_dim, lp_extract.ratio, lp_extract.add_opacity_dist, lp_extract.add_cov_dist,\

@@ -41,11 +41,18 @@ class Scene:
         self.train_cameras = {}
         self.test_cameras = {}
 
-        if os.path.exists(os.path.join(args.source_path, "sparse")):
-            scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval, args.lod)
-        elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
-            print("Found transforms_train.json file, assuming Blender data set!")
-            scene_info = sceneLoadTypeCallbacks["Blender"](args.source_path, args.white_background, args.eval, ply_path=ply_path)
+        if args.data_type == 'Colmap':
+            scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval, args.ds)
+        elif args.data_type == 'Mega':
+            scene_info = sceneLoadTypeCallbacks["Mega"](args.source_path, args.split_folder, args.eval)
+        elif args.data_type == 'MegaMesh':
+            scene_info = sceneLoadTypeCallbacks["MegaMesh"](args.source_path, args.split_folder, args.eval)
+        elif args.data_type == 'Okutama':
+             scene_info = sceneLoadTypeCallbacks["Okutama"](args.source_path, args.images, args.eval)
+        elif args.data_type == 'OkutamaMesh':
+            scene_info = sceneLoadTypeCallbacks["Okutama"](args.source_path, args.images, args.eval)
+        elif args.data_type == 'Blender':
+            scene_info = sceneLoadTypeCallbacks["Blender"](args.source_path, args.random_background, args.white_background,  args.eval, ply_path=ply_path)
         else:
             assert False, "Could not recognize scene type!"
 
@@ -56,8 +63,9 @@ class Scene:
                 with open(ply_path, 'rb') as src_file, open(os.path.join(self.model_path, "input.ply") , 'wb') as dest_file:
                     dest_file.write(src_file.read())
             else:
-                with open(scene_info.ply_path, 'rb') as src_file, open(os.path.join(self.model_path, "input.ply") , 'wb') as dest_file:
-                    dest_file.write(src_file.read())
+                if args.gs_type != "gs_mesh":
+                    with open(scene_info.ply_path, 'rb') as src_file, open(os.path.join(self.model_path, "input.ply") , 'wb') as dest_file:
+                        dest_file.write(src_file.read())
             json_cams = []
             camlist = []
             if scene_info.test_cameras:
@@ -92,7 +100,10 @@ class Scene:
                                                            "point_cloud",
                                                            "iteration_" + str(self.loaded_iter)))
         else:
-            self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
+            if len(args.meshes) != 0:
+                self.gaussians.create_from_meshes(args.num_splats, self.cameras_extent)
+            else:
+                self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
 
     def save(self, iteration):
         point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))

@@ -75,6 +75,13 @@ class ModelParams(ParamGroup):
         self.add_opacity_dist = False
         self.add_cov_dist = False
         self.add_color_dist = False
+
+        # Create from Meshes
+        self.dist_threshold = 0.01
+    
+        # Colmap Model Split 
+        self.split_folder = ""
+        self._data_type = "" # Colmap, Blender, Colmap_w_Mesh
         
         super().__init__(parser, "Loading Parameters", sentinel)
 

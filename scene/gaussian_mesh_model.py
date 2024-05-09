@@ -22,6 +22,8 @@ from simple_knn._C import distCUDA2
 from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation
 from scene.embedding import Embedding
+import trimesh
+import pdb
 
     
 class GaussianModel:
@@ -57,6 +59,8 @@ class GaussianModel:
                  add_opacity_dist : bool = False,
                  add_cov_dist : bool = False,
                  add_color_dist : bool = False,
+                 meshes = None, 
+                 dist_threshold: float=0.01
                  ):
 
         self.feat_dim = feat_dim
@@ -127,6 +131,26 @@ class GaussianModel:
             nn.Sigmoid()
         ).cuda()
 
+        if meshes is not None and len(meshes) > 0:
+            # for binding GaussianModel to a mesh
+            self.binding = None  # gaussian index to face index
+            self.binding_counter = None  # number of points bound to each face
+            self.dist_threshold = dist_threshold
+            vertices, triangles = [], []
+            v_cumsum, f_cumsum = [0], [0]
+            for i, mesh_file in enumerate(meshes):
+                mesh = trimesh.load(mesh_file, force='mesh')
+                print(f"Loaded cascade {i} has {len(mesh.vertices)} vertices and {len(mesh.faces)} faces")
+                vertices.append(mesh.vertices)
+                triangles.append(mesh.faces + v_cumsum[-1])
+                v_cumsum.append(v_cumsum[-1] + mesh.vertices.shape[0])
+                f_cumsum.append(f_cumsum[-1] + mesh.faces.shape[0])
+            vertices = np.concatenate(vertices, axis=0)
+            triangles = np.concatenate(triangles, axis=0)
+            self.v_cumsum = np.array(v_cumsum)
+            self.f_cumsum = np.array(f_cumsum)
+            self.vertices = torch.from_numpy(vertices).float() # [N, 3]
+            self.faces = torch.from_numpy(triangles).long()
 
     def eval(self):
         self.mlp_opacity.eval()
@@ -225,6 +249,53 @@ class GaussianModel:
     
     def get_covariance(self, scaling_modifier = 1):
         return self.covariance_activation(self.get_scaling, scaling_modifier, self._rotation)
+
+    def create_from_meshes(self, num_splats: int, spatial_lr_scale: float):
+        print(f"num_splats: {num_splats}")
+        # triangles = self.vertices[self.faces, :]
+        # float_points = []
+        # for cas, n_gaussians_per_surface_triangle in enumerate(num_splats):
+        #     surface_triangle_bary_coords = self.set_surface_triangle_bary_coords(n_gaussians_per_surface_triangle, torch.device("cpu"))
+        #     cur_tri = triangles[self.f_cumsum[cas]:self.f_cumsum[cas+1]] - self.v_cumsum[cas]
+        #     points = cur_tri[:,None] * surface_triangle_bary_coords[None] # n_faces, n_gaussians_per_face, 3, n_coords
+        #     points = points.sum(dim=-2) # n_faces,n_gaussians_per_face, n_coords
+        #     points = points.reshape(-1, 3) # n_faces*n_gaussians_per_face, n_coords
+        #     float_points.append(points)
+        # float_points = torch.cat(float_points, dim=0)
+
+        self.spatial_lr_scale = spatial_lr_scale
+        points = self.vertices[::self.ratio]
+        # if self.voxel_size <= 0:
+        #     init_points = torch.tensor(points).float().cuda()
+        #     init_dist = distCUDA2(init_points).float().cuda()
+        #     median_dist, _ = torch.kthvalue(init_dist, int(init_dist.shape[0]*0.5))
+        #     self.voxel_size = median_dist.item()
+        #     del init_dist
+        #     del init_points
+        #     torch.cuda.empty_cache()
+
+        # points = self.voxelize_sample(points, voxel_size=self.voxel_size)
+        fused_point_cloud = torch.tensor(np.asarray(points)).float().cuda()
+        offsets = torch.zeros((fused_point_cloud.shape[0], self.n_offsets, 3)).float().cuda()
+        anchors_feat = torch.zeros((fused_point_cloud.shape[0], self.feat_dim)).float().cuda()
+        
+        print("Number of points at initialisation : ", fused_point_cloud.shape[0])
+
+        dist2 = torch.clamp_min(distCUDA2(fused_point_cloud).float().cuda(), 0.0000001)
+        scales = torch.log(torch.sqrt(dist2))[...,None].repeat(1, 6)
+        
+        rots = torch.zeros((fused_point_cloud.shape[0], 4), device="cuda")
+        rots[:, 0] = 1
+
+        opacities = inverse_sigmoid(0.1 * torch.ones((fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda"))
+
+        self._anchor = nn.Parameter(fused_point_cloud.requires_grad_(True))
+        self._offset = nn.Parameter(offsets.requires_grad_(True))
+        self._anchor_feat = nn.Parameter(anchors_feat.requires_grad_(True))
+        self._scaling = nn.Parameter(scales.requires_grad_(True))
+        self._rotation = nn.Parameter(rots.requires_grad_(False))
+        self._opacity = nn.Parameter(opacities.requires_grad_(False))
+        self.max_radii2D = torch.zeros((self.get_anchor.shape[0]), device="cuda")
     
     def voxelize_sample(self, data=None, voxel_size=0.01):
         np.random.shuffle(data)
@@ -280,8 +351,6 @@ class GaussianModel:
         self.offset_gradient_accum = torch.zeros((self.get_anchor.shape[0]*self.n_offsets, 1), device="cuda")
         self.offset_denom = torch.zeros((self.get_anchor.shape[0]*self.n_offsets, 1), device="cuda")
         self.anchor_demon = torch.zeros((self.get_anchor.shape[0], 1), device="cuda")
-
-        
         
         if self.use_feat_bank:
             l = [

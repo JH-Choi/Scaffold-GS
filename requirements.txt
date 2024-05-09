@@ -1,0 +1,10 @@
+plyfile
+torch-scatter
+tqdm
+einops
+wandb
+lpips
+laspy
+colorama
+jaxtyping
+opencv-python
