@@ -35,7 +35,6 @@ import lpips
 from random import randint
 from utils.loss_utils import l1_loss, ssim
 from utils.general_utils import PILtoTorch
-from gaussian_renderer import prefilter_voxel, render, network_gui
 import sys
 from scene import Scene
 from utils.general_utils import safe_state
@@ -493,6 +492,15 @@ if __name__ == "__main__":
     lp.gs_type = args.gs_type
     lp.num_splats = args.num_splats
     lp.meshes = args.meshes
+   
+    # enable logging
+    model_path = args.model_path
+    os.makedirs(model_path, exist_ok=True)
+
+    logger = get_logger(model_path)
+
+
+    logger.info(f'args: {args}')
 
     with open(os.path.join(args.model_path, "all_args"), 'w') as cfg_log_f:
         cfg_log_f.write('\n------------args-----------------\n')
@@ -504,15 +512,6 @@ if __name__ == "__main__":
         cfg_log_f.write('\n------------pp_extract--------------\n')
         cfg_log_f.write(str(Namespace(**vars(pp))))
         cfg_log_f.write('\n------------------------------------\n')
-    
-    # enable logging
-    model_path = args.model_path
-    os.makedirs(model_path, exist_ok=True)
-
-    logger = get_logger(model_path)
-
-
-    logger.info(f'args: {args}')
 
     if args.gpu != '-1':
         os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
@@ -545,24 +544,36 @@ if __name__ == "__main__":
     # Initialize system state (RNG)
     safe_state(args.quiet)
 
-    # Start GUI server, configure and run training
-    network_gui.init(args.ip, args.port)
-    torch.autograd.set_detect_anomaly(args.detect_anomaly)
-
     lp_extract = lp.extract(args)
-
     if args.model_name == 'ScaffoldGS':
         from scene.gaussian_model import GaussianModel
+        from gaussian_renderer import prefilter_voxel, render, network_gui
+        global prefilter_voxel, render, network_gui
         gaussians = GaussianModel(lp_extract.feat_dim, lp_extract.n_offsets, lp_extract.voxel_size, lp_extract.update_depth, \
                                 lp_extract.update_init_factor, lp_extract.update_hierachy_factor, lp_extract.use_feat_bank, \
                                 lp_extract.appearance_dim, lp_extract.ratio, lp_extract.add_opacity_dist, lp_extract.add_cov_dist, \
                                 lp_extract.add_color_dist)
     elif args.model_name == 'ScaffoldMeshGS':
         from scene.gaussian_mesh_model import GaussianModel
+        from gaussian_renderer import prefilter_voxel, render, network_gui
+        global prefilter_voxel, render, network_gui
         gaussians = GaussianModel(lp_extract.feat_dim, lp_extract.n_offsets, lp_extract.voxel_size, lp_extract.update_depth, \
                                 lp_extract.update_init_factor, lp_extract.update_hierachy_factor, lp_extract.use_feat_bank, \
                                 lp_extract.appearance_dim, lp_extract.ratio, lp_extract.add_opacity_dist, lp_extract.add_cov_dist,\
                                 lp_extract.add_color_dist, lp_extract.meshes, lp_extract.dist_threshold)
+    elif args.model_name == 'ScaffoldMeshKNNGS':
+        from scene.gaussian_mesh_knn_model import GaussianModel
+        from gaussian_renderer import network_gui
+        from gaussian_renderer.meshknn import prefilter_voxel, render
+        global prefilter_voxel, render, network_gui
+        gaussians = GaussianModel(lp_extract.feat_dim, lp_extract.n_offsets, lp_extract.voxel_size, lp_extract.update_depth, \
+                                lp_extract.update_init_factor, lp_extract.update_hierachy_factor, lp_extract.use_feat_bank, \
+                                lp_extract.appearance_dim, lp_extract.ratio, lp_extract.add_opacity_dist, lp_extract.add_cov_dist,\
+                                lp_extract.add_color_dist, lp_extract.meshes, lp_extract.dist_threshold)
+
+    # Start GUI server, configure and run training
+    network_gui.init(args.ip, args.port)
+    torch.autograd.set_detect_anomaly(args.detect_anomaly)
 
     if args.warmup:
         logger.info("\n Warmup finished! Reboot from last checkpoints")
