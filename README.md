@@ -6,12 +6,23 @@
 [[`Project Page`](https://city-super.github.io/scaffold-gs/)][[`arxiv`](https://arxiv.org/abs/2312.00109)]
 
 ## News
+**[2024.04.05]**  Scaffold-GS is selected as a 🎈**highlight** in CVPR2024.
+
+**[2024.03.27]**  🎈We release [Octree-GS](https://city-super.github.io/octree-gs), supporting an explicit *LOD* representation, rendering faster in large-scale scene with high quality.
+
+**[2024.03.26]**  🎈We release [GSDF](https://city-super.github.io/GSDF/), which improves rendering and reconstruction quality simultaneously.
+
+**[2024.02.27]**  Accepted to [CVPR 2024](https://cvpr.thecvf.com/).
 
 **[2024.01.22]**  We add the appearance embedding to Scaffold-GS to handle wild scenes.
 
 **[2024.01.22]** 🎈👀 The [viewer](https://github.com/city-super/Scaffold-GS/tree/main/SIBR_viewers) for Scaffold-GS is available now. 
 
 **[2023.12.10]** We release the code.
+
+## TODO List
+- [ ] Explore on removing the MLP module
+- [ ] Improve the training configuration system
 
 ## Overview
 
@@ -173,13 +184,11 @@ The [viewer](https://github.com/city-super/Scaffold-GS/tree/main/SIBR_viewers) f
 If you find our work helpful, please consider citing:
 
 ```bibtex
-@misc{scaffoldgs,
-      title={Scaffold-GS: Structured 3D Gaussians for View-Adaptive Rendering}, 
-      author={Tao Lu and Mulin Yu and Linning Xu and Yuanbo Xiangli and Limin Wang and Dahua Lin and Bo Dai},
-      year={2023},
-      eprint={2312.00109},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV}
+@article{scaffoldgs,
+  author    = {Lu, Tao, Mulin Yu, Linning Xu, Yuanbo Xiangli, Limin Wang, Dahua Lin, and Bo Dai.},
+  title     = {Scaffold-GS: Structured 3D Gaussians for View-Adaptive Rendering},
+  journal   = {Conference on Computer Vision and Pattern Recognition (CVPR)},
+  year      = {2024},
 }
 ```
 
