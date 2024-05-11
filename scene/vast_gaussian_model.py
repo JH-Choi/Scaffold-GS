@@ -22,6 +22,7 @@ from simple_knn._C import distCUDA2
 from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation
 from scene.embedding import Embedding
+from scene.appearance_network import AppearanceNetwork
 import trimesh
 import pdb
 
@@ -134,6 +135,12 @@ class GaussianModel:
             nn.Sigmoid()
         ).cuda()
 
+        # appearance network and appearance embedding
+        self.appearance_network = AppearanceNetwork(3+64, 3).cuda()
+        std = 1e-4
+        self._appearance_embeddings = nn.Parameter(torch.empty(2048, 64).cuda())
+        self._appearance_embeddings.data.normal_(0, std)
+
         if meshes is not None and len(meshes) > 0:
             # for binding GaussianModel to a mesh
             self.binding = None  # gaussian index to face index
@@ -208,8 +215,11 @@ class GaussianModel:
             self.embedding_appearance = Embedding(num_cameras, self.appearance_dim).cuda()
 
     @property
-    def get_appearance(self):
+    def get_appearance(self): # Scaffold-GS
         return self.embedding_appearance
+    
+    def get_apperance_embedding(self, idx): # Vast Gaussian
+        return self._appearance_embeddings[idx] 
 
     @property
     def get_scaling(self):
@@ -382,7 +392,9 @@ class GaussianModel:
                 {'params': self.mlp_opacity.parameters(), 'lr': training_args.mlp_opacity_lr_init, "name": "mlp_opacity"},
                 {'params': self.mlp_cov.parameters(), 'lr': training_args.mlp_cov_lr_init, "name": "mlp_cov"},
                 {'params': self.mlp_color.parameters(), 'lr': training_args.mlp_color_lr_init, "name": "mlp_color"},
-                {'params': self.embedding_appearance.parameters(), 'lr': training_args.appearance_lr_init, "name": "embedding_appearance"},
+                {'params': self.embedding_appearance.parameters(), 'lr': training_args.appearance_lr_init, "name": "embedding_appearance"}, # Scaffoldgs
+                {'params': [self._appearance_embeddings], 'lr': training_args.appearance_embeddings_lr, "name": "appearance_embeddings"}, # vastgs
+                {'params': self.appearance_network.parameters(), 'lr': training_args.appearance_network_lr, "name": "appearance_network"} # vastgs
             ]
         else:
             l = [
@@ -396,6 +408,8 @@ class GaussianModel:
                 {'params': self.mlp_opacity.parameters(), 'lr': training_args.mlp_opacity_lr_init, "name": "mlp_opacity"},
                 {'params': self.mlp_cov.parameters(), 'lr': training_args.mlp_cov_lr_init, "name": "mlp_cov"},
                 {'params': self.mlp_color.parameters(), 'lr': training_args.mlp_color_lr_init, "name": "mlp_color"},
+                {'params': [self._appearance_embeddings], 'lr': training_args.appearance_embeddings_lr, "name": "appearance_embeddings"}, # vastgs
+                {'params': self.appearance_network.parameters(), 'lr': training_args.appearance_network_lr, "name": "appearance_network"} # vastgs
             ]
 
         self.optimizer = torch.optim.Adam(l, lr=0.0, eps=1e-15)
@@ -537,6 +551,8 @@ class GaussianModel:
     def replace_tensor_to_optimizer(self, tensor, name):
         optimizable_tensors = {}
         for group in self.optimizer.param_groups:
+            if group["name"] in ["appearance_embeddings", "appearance_network"]:
+                continue
             if group["name"] == name:
                 stored_state = self.optimizer.state.get(group['params'][0], None)
                 stored_state["exp_avg"] = torch.zeros_like(tensor)
@@ -557,6 +573,8 @@ class GaussianModel:
                 'conv' in group['name'] or \
                 'feat_base' in group['name'] or \
                 'embedding' in group['name']:
+                continue
+            if group["name"] in ["appearance_embeddings", "appearance_network"]:
                 continue
             assert len(group["params"]) == 1
             extension_tensor = tensors_dict[group["name"]]
@@ -601,8 +619,6 @@ class GaussianModel:
         self.offset_denom[combined_mask] += 1
 
         
-
-        
     def _prune_anchor_optimizer(self, mask):
         optimizable_tensors = {}
         for group in self.optimizer.param_groups:
@@ -611,7 +627,8 @@ class GaussianModel:
                 'feat_base' in group['name'] or \
                 'embedding' in group['name']:
                 continue
-
+            if group["name"] in ["appearance_embeddings", "appearance_network"]:
+                continue
             stored_state = self.optimizer.state.get(group['params'][0], None)
             if stored_state is not None:
                 stored_state["exp_avg"] = stored_state["exp_avg"][mask]

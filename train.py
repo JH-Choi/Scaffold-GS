@@ -74,7 +74,6 @@ def saveRuntimeCode(dst: str) -> None:
 
     log_dir = pathlib.Path(__file__).parent.resolve()
 
-
     shutil.copytree(log_dir, dst, ignore=shutil.ignore_patterns(*ignorePatterns))
     
     print('Backup Finished!')

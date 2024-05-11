@@ -26,7 +26,6 @@ import json
 import wandb
 import time
 from os import makedirs
-import shutil, pathlib
 from pathlib import Path
 from PIL import Image
 import torchvision.transforms.functional as tf
@@ -38,7 +37,7 @@ from utils.general_utils import PILtoTorch
 from gaussian_renderer import prefilter_voxel, render, network_gui
 import sys
 from scene import Scene
-from utils.general_utils import safe_state
+from utils.general_utils import safe_state, saveRuntimeCode
 import uuid
 from tqdm import tqdm
 from utils.image_utils import psnr
@@ -56,28 +55,33 @@ except ImportError:
     TENSORBOARD_FOUND = False
     print("not found tf board")
 
-def saveRuntimeCode(dst: str) -> None:
-    additionalIgnorePatterns = ['.git', '.gitignore']
-    ignorePatterns = set()
-    ROOT = '.'
-    with open(os.path.join(ROOT, '.gitignore')) as gitIgnoreFile:
-        for line in gitIgnoreFile:
-            if not line.startswith('#'):
-                if line.endswith('\n'):
-                    line = line[:-1]
-                if line.endswith('/'):
-                    line = line[:-1]
-                ignorePatterns.add(line)
-    ignorePatterns = list(ignorePatterns)
-    for additionalPattern in additionalIgnorePatterns:
-        ignorePatterns.append(additionalPattern)
-
-    log_dir = pathlib.Path(__file__).parent.resolve()
-
-
-    shutil.copytree(log_dir, dst, ignore=shutil.ignore_patterns(*ignorePatterns))
+def L1_loss_appearance(image, gt_image, gaussians, view_idx, mask=None):
+    appearance_embedding = gaussians.get_apperance_embedding(view_idx)
+    # center crop the image
+    origH, origW = image.shape[1:]
+    H = origH // 32 * 32
+    W = origW // 32 * 32
+    left = origW // 2 - W // 2
+    top = origH // 2 - H // 2
+    crop_image = image[:, top:top+H, left:left+W]
+    crop_gt_image = gt_image[:, top:top+H, left:left+W]
     
-    print('Backup Finished!')
+    # down sample the image
+    crop_image_down = torch.nn.functional.interpolate(crop_image[None], size=(H//32, W//32), mode="bilinear", align_corners=True)[0]
+    
+    crop_image_down = torch.cat([crop_image_down, appearance_embedding[None].repeat(H//32, W//32, 1).permute(2, 0, 1)], dim=0)[None]
+    mapping_image = gaussians.appearance_network(crop_image_down)
+    transformed_image = mapping_image * crop_image
+    if mask is not None:
+        crop_mask = mask[:, top:top+H, left:left+W]
+        return l1_loss(transformed_image, crop_gt_image, crop_mask), transformed_image
+    else:
+        return l1_loss(transformed_image, crop_gt_image), transformed_image
+    # if not return_transformed_image:
+    #     return l1_loss(transformed_image, crop_gt_image)
+    # else:
+    #     transformed_image = torch.nn.functional.interpolate(transformed_image, size=(origH, origW), mode="bilinear", align_corners=True)[0]
+    #     return transformed_image
 
 
 def training(dataset, opt, pipe, dataset_name, gaussians, scene, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, wandb=None, logger=None, ply_path=None):
@@ -136,9 +140,11 @@ def training(dataset, opt, pipe, dataset_name, gaussians, scene, testing_iterati
         
         image, viewspace_point_tensor, visibility_filter, offset_selection_mask, radii, scaling, opacity = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["selection_mask"], render_pkg["radii"], render_pkg["scaling"], render_pkg["neural_opacity"]
 
+        gt_mask = None
         viewpoint_cam.original_image = PILtoTorch(Image.open(viewpoint_cam.image_path), (viewpoint_cam.image_width, viewpoint_cam.image_height))
         gt_image = viewpoint_cam.original_image.cuda()
-        Ll1 = l1_loss(image, gt_image)
+        Ll1, transformed_image = L1_loss_appearance(image, gt_image, gaussians, viewpoint_cam.idx, gt_mask)
+        # Ll1 = l1_loss(image, gt_image)
 
         ssim_loss = (1.0 - ssim(image, gt_image))
         scaling_reg = scaling.prod(dim=1).mean()
@@ -162,6 +168,7 @@ def training(dataset, opt, pipe, dataset_name, gaussians, scene, testing_iterati
             os.makedirs(tmp_path, exist_ok=True)
             if iteration % 1000 == 0:
                 torchvision.utils.save_image(image, os.path.join(tmp_path, "image_iter{}.png".format(iteration)))
+                torchvision.utils.save_image(transformed_image, os.path.join(tmp_path, "transform_image_iter{}.png".format(iteration)))
 
             # Log and save
             training_report(tb_writer, dataset_name, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background), wandb, logger)
@@ -288,11 +295,13 @@ def training_report(tb_writer, dataset_name, iteration, Ll1, loss, l1_loss, elap
 
 def render_set(model_path, name, iteration, views, gaussians, pipeline, background):
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
+    transform_render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "transform_renders")
     error_path = os.path.join(model_path, name, "ours_{}".format(iteration), "errors")
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
     makedirs(render_path, exist_ok=True)
     makedirs(error_path, exist_ok=True)
     makedirs(gts_path, exist_ok=True)
+    makedirs(transform_render_path, exist_ok=True)
     
     t_list = []
     visible_count_list = []
@@ -313,6 +322,19 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         visible_count = (render_pkg["radii"] > 0).sum()
         visible_count_list.append(visible_count)
 
+
+        appearance_embedding = gaussians.get_apperance_embedding(view.idx)
+        origH, origW = rendering.shape[1:]
+        H = origH // 32 * 32
+        W = origW // 32 * 32
+        left = origW // 2 - W // 2
+        top = origH // 2 - H // 2
+        crop_image = rendering[:, top:top+H, left:left+W]
+        crop_image_down = torch.nn.functional.interpolate(crop_image[None], size=(H//32, W//32), mode="bilinear", align_corners=True)[0]
+        crop_image_down = torch.cat([crop_image_down, appearance_embedding[None].repeat(H//32, W//32, 1).permute(2, 0, 1)], dim=0)[None]
+        mapping_image = gaussians.appearance_network(crop_image_down)
+        transformed_image = mapping_image * crop_image
+
         # gts
         view.original_image = PILtoTorch(Image.open(view.image_path), (view.image_width, view.image_height))
         gt = view.original_image[0:3, :, :]
@@ -324,6 +346,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         torchvision.utils.save_image(rendering, os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
         torchvision.utils.save_image(errormap, os.path.join(error_path, '{0:05d}'.format(idx) + ".png"))
         torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(idx) + ".png"))
+        torchvision.utils.save_image(transformed_image, os.path.join(transform_render_path, '{0:05d}'.format(idx) + ".png"))
         per_view_dict['{0:05d}'.format(idx) + ".png"] = visible_count.item()
     
     with open(os.path.join(model_path, name, "ours_{}".format(iteration), "per_view_count.json"), 'w') as fp:
@@ -373,7 +396,7 @@ def readImages(renders_dir, gt_dir):
     return renders, gts, image_names
 
 
-def evaluate(model_paths, visible_count=None, wandb=None, tb_writer=None, dataset_name=None, logger=None):
+def evaluate(model_paths, visible_count=None, wandb=None, tb_writer=None, dataset_name=None, logger=None, render_folder=None):
 
     full_dict = {}
     per_view_dict = {}
@@ -398,7 +421,8 @@ def evaluate(model_paths, visible_count=None, wandb=None, tb_writer=None, datase
 
         method_dir = test_dir / method
         gt_dir = method_dir/ "gt"
-        renders_dir = method_dir / "renders"
+        # renders_dir = method_dir / "renders"
+        renders_dir = method_dir / render_folder
         renders, gts, image_names = readImages(renders_dir, gt_dir)
 
         ssims = []
@@ -437,9 +461,9 @@ def evaluate(model_paths, visible_count=None, wandb=None, tb_writer=None, datase
                                                     "LPIPS": {name: lp for lp, name in zip(torch.tensor(lpipss).tolist(), image_names)},
                                                     "VISIBLE_COUNT": {name: vc for vc, name in zip(torch.tensor(visible_count).tolist(), image_names)}})
 
-    with open(scene_dir + "/results.json", 'w') as fp:
+    with open(scene_dir + f"/results_{render_folder}.json", 'w') as fp:
         json.dump(full_dict[scene_dir], fp, indent=True)
-    with open(scene_dir + "/per_view.json", 'w') as fp:
+    with open(scene_dir + f"/per_view_{render_folder}.json", 'w') as fp:
         json.dump(per_view_dict[scene_dir], fp, indent=True)
     
 def get_logger(path):
@@ -577,5 +601,6 @@ if __name__ == "__main__":
 
     # calc metrics
     logger.info("\n Starting evaluation...")
-    evaluate(args.model_path, visible_count=visible_count, wandb=wandb, logger=logger)
+    evaluate(args.model_path, visible_count=visible_count, wandb=wandb, logger=logger, render_folder='renders')
+    evaluate(args.model_path, visible_count=visible_count, wandb=wandb, logger=logger, render_folder='transform_renders')
     logger.info("\nEvaluating complete.")

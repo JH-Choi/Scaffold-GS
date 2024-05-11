@@ -9,11 +9,13 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
+import os
 import torch
 import sys
 from datetime import datetime
 import numpy as np
 import random
+import shutil, pathlib
 
 def inverse_sigmoid(x):
     return torch.log(x/(1-x))
@@ -131,3 +133,26 @@ def safe_state(silent):
     np.random.seed(0)
     torch.manual_seed(0)
     torch.cuda.set_device(torch.device("cuda:0"))
+
+def saveRuntimeCode(dst: str) -> None:
+    additionalIgnorePatterns = ['.git', '.gitignore']
+    ignorePatterns = set()
+    ROOT = '.'
+    with open(os.path.join(ROOT, '.gitignore')) as gitIgnoreFile:
+        for line in gitIgnoreFile:
+            if not line.startswith('#'):
+                if line.endswith('\n'):
+                    line = line[:-1]
+                if line.endswith('/'):
+                    line = line[:-1]
+                ignorePatterns.add(line)
+    ignorePatterns = list(ignorePatterns)
+    for additionalPattern in additionalIgnorePatterns:
+        ignorePatterns.append(additionalPattern)
+
+    log_dir = pathlib.Path(__file__).parent.resolve()
+
+
+    shutil.copytree(log_dir, dst, ignore=shutil.ignore_patterns(*ignorePatterns))
+    
+    print('Backup Finished!')

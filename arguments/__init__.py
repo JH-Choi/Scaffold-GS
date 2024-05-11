@@ -145,6 +145,10 @@ class OptimizationParams(ParamGroup):
         self.appearance_lr_final = 0.0005
         self.appearance_lr_delay_mult = 0.01
         self.appearance_lr_max_steps = 30_000
+        
+        # Vast Gaussian Splatting
+        self.appearance_embeddings_lr = 0.001
+        self.appearance_network_lr = 0.001
     
         self.encoder_dir_lr_init = 0.005
         self.encoder_dir_lr_final = 0.00001
