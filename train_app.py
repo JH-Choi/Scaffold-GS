@@ -516,6 +516,14 @@ if __name__ == "__main__":
     lp.num_splats = args.num_splats
     lp.meshes = args.meshes
 
+    # enable logging
+    model_path = args.model_path
+    os.makedirs(model_path, exist_ok=True)
+
+    logger = get_logger(model_path)
+
+    logger.info(f'args: {args}')
+
     with open(os.path.join(args.model_path, "all_args"), 'w') as cfg_log_f:
         cfg_log_f.write('\n------------args-----------------\n')
         cfg_log_f.write(str(Namespace(**vars(args))))
@@ -527,15 +535,6 @@ if __name__ == "__main__":
         cfg_log_f.write(str(Namespace(**vars(pp))))
         cfg_log_f.write('\n------------------------------------\n')
     
-    # enable logging
-    model_path = args.model_path
-    os.makedirs(model_path, exist_ok=True)
-
-    logger = get_logger(model_path)
-
-
-    logger.info(f'args: {args}')
-
     if args.gpu != '-1':
         os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
         os.system("echo $CUDA_VISIBLE_DEVICES")

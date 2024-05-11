@@ -99,7 +99,7 @@ MESH_FILE=$DATA_PATH/$SPLIT_FOLDER/mesh_deci0.75.ply
 GS_TYPE=gs_mesh
 DATA_NAME=MegaMesh
 MODEL_NAME=VastScaffoldMeshGS
-OUTPUT_FOLDER=outputs/building/VastMeshGS_7
+OUTPUT_FOLDER=outputs/building/VastScMeshGS_7
 
 python train_app.py --eval -s $DATA_PATH --lod 0 --gpu -1 --voxel_size 0.01 \
  --update_init_factor 16 --appearance_dim 0 --ratio 1 --iterations 60_000 \
@@ -113,7 +113,7 @@ MESH_FILE=$DATA_PATH/$SPLIT_FOLDER/mesh_deci0.75.ply
 GS_TYPE=gs_mesh
 DATA_NAME=MegaMesh
 MODEL_NAME=VastScaffoldMeshGS
-OUTPUT_FOLDER=outputs/building/VastMeshGS_7_app32
+OUTPUT_FOLDER=outputs/building/VastScMeshGS_7_app32
 
 python train_app.py --eval -s $DATA_PATH --lod 0 --gpu -1 --voxel_size 0.01 \
  --update_init_factor 16 --appearance_dim 32 --ratio 1 --iterations 60_000 \
