@@ -42,6 +42,7 @@ from tqdm import tqdm
 from utils.image_utils import psnr
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
+import pdb
 
 # torch.set_num_threads(32)
 lpips_fn = lpips.LPIPS(net='vgg').to('cuda')
@@ -91,6 +92,9 @@ def training(dataset, opt, pipe, dataset_name, gaussians, scene, testing_iterati
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
+
+    if dataset.load_iteration > 0:
+        first_iter = dataset.load_iteration
 
     iter_start = torch.cuda.Event(enable_timing = True)
     iter_end = torch.cuda.Event(enable_timing = True)
@@ -336,7 +340,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
 
         # gts
         view.original_image = PILtoTorch(Image.open(view.image_path), (view.image_width, view.image_height))
-        gt = view.original_image[0:3, :, :]
+        gt = view.original_image[0:3, :, :].cuda()
         
         # error maps
         errormap = (rendering - gt).abs()
@@ -570,6 +574,7 @@ if __name__ == "__main__":
     if args.model_name == 'VastScaffoldMeshGS':
         from scene.vast_gaussian_model import GaussianModel
         from gaussian_renderer import prefilter_voxel, render, network_gui
+        global prefilter_voxel, render, network_gui
         gaussians = GaussianModel(lp_extract.feat_dim, lp_extract.n_offsets, lp_extract.voxel_size, lp_extract.update_depth, \
                                 lp_extract.update_init_factor, lp_extract.update_hierachy_factor, lp_extract.use_feat_bank, \
                                 lp_extract.appearance_dim, lp_extract.ratio, lp_extract.add_opacity_dist, lp_extract.add_cov_dist,\
@@ -584,7 +589,8 @@ if __name__ == "__main__":
         new_ply_path = os.path.join(args.model_path, f'point_cloud/iteration_{args.iterations}', 'point_cloud.ply')
         scene = Scene(lp_extract, gaussians, ply_path=new_ply_path, shuffle=False)
     else:
-        scene = Scene(lp_extract, gaussians, ply_path=None, shuffle=False)
+        # scene = Scene(lp_extract, gaussians, ply_path=None, shuffle=False)
+        scene = Scene(lp_extract, gaussians, load_iteration=-1, ply_path=None, shuffle=False)
 
     ### Set appearance code for each camera
     trainCameras, testCameras = scene.getTrainCameras().copy(), scene.getTestCameras().copy()
