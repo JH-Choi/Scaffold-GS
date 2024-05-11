@@ -59,6 +59,12 @@ class Camera(nn.Module):
         self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
         self.camera_center = self.world_view_transform.inverse()[3, :3]
 
+        tan_fovx = np.tan(self.FoVx / 2.0)
+        tan_fovy = np.tan(self.FoVy / 2.0)
+        self.focal_y = self.image_height / (2.0 * tan_fovy)
+        self.focal_x = self.image_width / (2.0 * tan_fovx)
+         
+
 class MiniCam:
     def __init__(self, width, height, fovy, fovx, znear, zfar, world_view_transform, full_proj_transform):
         self.image_width = width

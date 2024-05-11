@@ -145,6 +145,11 @@ class OptimizationParams(ParamGroup):
         self.appearance_lr_final = 0.0005
         self.appearance_lr_delay_mult = 0.01
         self.appearance_lr_max_steps = 30_000
+    
+        self.encoder_dir_lr_init = 0.005
+        self.encoder_dir_lr_final = 0.00001
+        self.encoder_dir_lr_delay_mult = 0.01
+        self.encoder_dir_lr_max_steps = 30_000
 
         self.percent_dense = 0.01
         self.lambda_dssim = 0.2

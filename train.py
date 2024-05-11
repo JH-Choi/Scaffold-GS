@@ -594,7 +594,15 @@ if __name__ == "__main__":
                                 lp_extract.update_init_factor, lp_extract.update_hierachy_factor, lp_extract.use_feat_bank, \
                                 lp_extract.appearance_dim, lp_extract.ratio, lp_extract.add_opacity_dist, lp_extract.add_cov_dist,\
                                 lp_extract.add_color_dist, lp_extract.meshes, lp_extract.dist_threshold)
-        
+    elif args.model_name == 'ScaffoldMeshGSwEncoding':
+        from scene.gaussian_mesh_encoding import GaussianModel
+        from gaussian_renderer import network_gui
+        from gaussian_renderer.meshencoding import prefilter_voxel, render
+        global prefilter_voxel, render, network_gui
+        gaussians = GaussianModel(lp_extract.feat_dim, lp_extract.n_offsets, lp_extract.voxel_size, lp_extract.update_depth, \
+                                lp_extract.update_init_factor, lp_extract.update_hierachy_factor, lp_extract.use_feat_bank, \
+                                lp_extract.appearance_dim, lp_extract.ratio, lp_extract.add_opacity_dist, lp_extract.add_cov_dist,\
+                                lp_extract.add_color_dist, lp_extract.meshes, lp_extract.dist_threshold)   
 
     # Start GUI server, configure and run training
     network_gui.init(args.ip, args.port)
@@ -605,8 +613,11 @@ if __name__ == "__main__":
         new_ply_path = os.path.join(args.model_path, f'point_cloud/iteration_{args.load_iteration}', 'point_cloud.ply')
         scene = Scene(lp_extract, gaussians, ply_path=new_ply_path, shuffle=False)
     else:
-        # scene = Scene(lp_extract, gaussians, ply_path=None, shuffle=False)
-        scene = Scene(lp_extract, gaussians, load_iteration=-1, ply_path=None, shuffle=False) # TODO
+        scene = Scene(lp_extract, gaussians, ply_path=None, shuffle=False)
+        # scene = Scene(lp_extract, gaussians, load_iteration=-1, ply_path=None, shuffle=False) # TODO
+
+    if args.model_name == 'ScaffoldMeshGSwEncoding':
+        gaussians.update_anchor_bound()
 
     # training
     scene.gaussians.train()

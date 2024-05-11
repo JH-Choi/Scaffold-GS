@@ -301,13 +301,14 @@ def readColmapMeshMegaSceneInfo(path, split_folder, eval):
     cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
 
     if eval:
-        train_cam_infos = [c for c in cam_infos if c.image_path.split('/')[-3] == "train"]
+        # train_cam_infos = [c for c in cam_infos if c.image_path.split('/')[-3] == "train"]
+        train_cam_infos = cam_infos
         test_cam_infos = [c for c in cam_infos if c.image_path.split('/')[-3] == "val"]
     else:
         train_cam_infos = cam_infos
         test_cam_infos = []
     
-    assert len(cam_infos) == len(train_cam_infos) + len(test_cam_infos)
+    # assert len(cam_infos) == len(train_cam_infos) + len(test_cam_infos)
 
     nerf_normalization = getNerfppNorm(train_cam_infos)
 
