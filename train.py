@@ -43,6 +43,7 @@ from tqdm import tqdm
 from utils.image_utils import psnr
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
+import pdb
 
 # torch.set_num_threads(32)
 lpips_fn = lpips.LPIPS(net='vgg').to('cuda')
@@ -83,10 +84,33 @@ def training(dataset, opt, pipe, dataset_name, gaussians, scene, testing_iterati
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
 
+    ### Set appearance code for each camera
+    trainCameras, testCameras = scene.getTrainCameras().copy(), scene.getTestCameras().copy()
+    allCameras = trainCameras + testCameras
+    file_names = []
+    for idx, camera in enumerate(allCameras):
+        file_names.append(os.path.basename(camera.image_path))
+
+    if args.data_type == "Mega" or args.data_type == "MegaMesh":
+        sorted_indices = sorted(list(range(len(file_names))), key=lambda i: file_names[i])
+    elif args.data_type == "Okutama" or args.data_type == "OkutamaMesh":
+        sorted_filenames_with_index = sorted(enumerate(file_names), key=lambda x: (x[1][:-8], int(x[1].split("_")[-1].split(".")[0][-4:])))
+        sorted_indices = [index for index, _ in sorted_filenames_with_index]
+    else:
+        raise NotImplementedError("Okutama dataset not implemented")
+    # sorted_files = [file_names[i] for i in sorted_indices] # debug
+    tot_cameras = scene.getTrainCameras() + scene.getTestCameras()
+    for idx, s_idx in enumerate(sorted_indices):
+        tot_cameras[s_idx].idx = idx
+    ####
+
     gaussians.training_setup(opt)
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
+    
+    if dataset.load_iteration > 0:
+        first_iter = dataset.load_iteration
 
     iter_start = torch.cuda.Event(enable_timing = True)
     iter_end = torch.cuda.Event(enable_timing = True)
@@ -314,7 +338,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
 
         # gts
         view.original_image = PILtoTorch(Image.open(view.image_path), (view.image_width, view.image_height))
-        gt = view.original_image[0:3, :, :]
+        gt = view.original_image[0:3, :, :].cuda()
         
         # error maps
         errormap = (rendering - gt).abs()
@@ -470,9 +494,8 @@ if __name__ == "__main__":
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
     parser.add_argument('--warmup', action='store_true', default=False)
+    parser.add_argument('--load_iteration', type=int, default=-1)
     parser.add_argument('--use_wandb', action='store_true', default=False)
-    # parser.add_argument("--test_iterations", nargs="+", type=int, default=[3_000, 7_000, 30_000])
-    # parser.add_argument("--save_iterations", nargs="+", type=int, default=[3_000, 7_000, 30_000])
     parser.add_argument("--test_iterations", nargs="+", type=int, default=[30_000])
     parser.add_argument("--save_iterations", nargs="+", type=int, default=[30_000])
     parser.add_argument("--quiet", action="store_true")
@@ -492,6 +515,7 @@ if __name__ == "__main__":
     lp.gs_type = args.gs_type
     lp.num_splats = args.num_splats
     lp.meshes = args.meshes
+    lp.load_iteration = args.load_iteration
    
     # enable logging
     model_path = args.model_path
@@ -570,6 +594,7 @@ if __name__ == "__main__":
                                 lp_extract.update_init_factor, lp_extract.update_hierachy_factor, lp_extract.use_feat_bank, \
                                 lp_extract.appearance_dim, lp_extract.ratio, lp_extract.add_opacity_dist, lp_extract.add_cov_dist,\
                                 lp_extract.add_color_dist, lp_extract.meshes, lp_extract.dist_threshold)
+        
 
     # Start GUI server, configure and run training
     network_gui.init(args.ip, args.port)
@@ -577,12 +602,14 @@ if __name__ == "__main__":
 
     if args.warmup:
         logger.info("\n Warmup finished! Reboot from last checkpoints")
-        new_ply_path = os.path.join(args.model_path, f'point_cloud/iteration_{args.iterations}', 'point_cloud.ply')
+        new_ply_path = os.path.join(args.model_path, f'point_cloud/iteration_{args.load_iteration}', 'point_cloud.ply')
         scene = Scene(lp_extract, gaussians, ply_path=new_ply_path, shuffle=False)
     else:
-        scene = Scene(lp_extract, gaussians, ply_path=None, shuffle=False)
+        # scene = Scene(lp_extract, gaussians, ply_path=None, shuffle=False)
+        scene = Scene(lp_extract, gaussians, load_iteration=-1, ply_path=None, shuffle=False) # TODO
 
     # training
+    scene.gaussians.train()
     training(lp_extract, op.extract(args), pp.extract(args), dataset, gaussians, scene, args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, wandb, logger)
 
     # All done
@@ -590,6 +617,7 @@ if __name__ == "__main__":
 
     # rendering
     logger.info(f'\nStarting Rendering~')
+    scene = Scene(lp_extract, gaussians, load_iteration=-1, shuffle=False)
     visible_count = render_sets(lp_extract, -1, pp.extract(args), gaussians, scene, wandb=wandb, logger=logger)
     logger.info("\nRendering complete.")
 

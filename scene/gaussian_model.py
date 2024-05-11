@@ -150,12 +150,10 @@ class GaussianModel:
         return (
             self._anchor,
             self._offset,
-            self._local,
             self._scaling,
             self._rotation,
             self._opacity,
             self.max_radii2D,
-            self.denom,
             self.optimizer.state_dict(),
             self.spatial_lr_scale,
         )
@@ -164,16 +162,13 @@ class GaussianModel:
         (self.active_sh_degree, 
         self._anchor, 
         self._offset,
-        self._local,
         self._scaling, 
         self._rotation, 
         self._opacity,
         self.max_radii2D, 
-        denom,
         opt_dict, 
         self.spatial_lr_scale) = model_args
         self.training_setup(training_args)
-        self.denom = denom
         self.optimizer.load_state_dict(opt_dict)
 
     def set_appearance(self, num_cameras):

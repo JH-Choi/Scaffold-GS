@@ -14,17 +14,52 @@ from einops import repeat
 import math
 from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
 from scene.gaussian_model import GaussianModel
+import frnn
 import pdb 
+
+
+def interpolation(features: torch.Tensor, indices: torch.Tensor, weights: torch.Tensor):
+    fg = torch.sum(features[indices] * weights.unsqueeze(-1), dim=-2)
+    return fg
 
 def generate_neural_gaussians(viewpoint_camera, pc : GaussianModel, visible_mask=None, is_training=False):
     ## view frustum filtering for acceleration    
     if visible_mask is None:
         visible_mask = torch.ones(pc.get_anchor.shape[0], dtype=torch.bool, device = pc.get_anchor.device)
-    
-    feat = pc._anchor_feat[visible_mask]
-    anchor = pc.get_anchor[visible_mask]
-    grid_offsets = pc._offset[visible_mask]
-    grid_scaling = pc.get_scaling[visible_mask]
+    # pc.get_anchor.shape = [3188710,3] 
+
+    # feat = pc._anchor_feat[visible_mask] # [471400, 32]
+    anchor = pc.get_anchor[visible_mask] # [471400, 3]
+    grid_offsets = pc._offset[visible_mask] # [471400, 10, 3]
+    grid_scaling = pc.get_scaling[visible_mask] # [471400, 6]
+
+    # # K: number of nearest neighbour considered
+    # # indicator_vector: (N,3) learnable indicator vector of each vertex
+    # # indicator_weight: weights of indicator vector influence
+    # K = 8 
+    # dis, indices, _, _ = frnn.frnn_grid_points(
+    #     anchor.unsqueeze(0), 
+    #     pc.get_anchor.unsqueeze(0),
+    #     None, 
+    #     None, 
+    #     K = K, 
+    #     r = 10, # voxel_size?
+    #     grid=pc.grid,
+    #     return_nn=False,
+    #     return_sorted=True,
+    # )  # (1,M,K)
+    # dis, indices = dis.detach(), indices.detach()
+    # dis = dis.sqrt()
+    # weights = 1 / (dis + 1e-7)
+    # weights = weights / torch.sum(weights, dim=-1, keepdims=True)  # (1,M,K)
+    # indices = indices.squeeze(0)  # (M, K)
+    # weights = weights.squeeze(0)  # (M, K)
+    # # indices: (N,K) the vertex indices of nearest K neighbours
+    # # weights: (N,K) the weights(inverse distance) of K nearest neighbours
+
+    weights = pc.weights[visible_mask]
+    indices = pc.indices[visible_mask]
+    feat = torch.sum(pc._anchor_feat[indices] * weights.unsqueeze(-1), dim=-2) # [471400, 32]
 
     ## get view properties for anchor
     ob_view = anchor - viewpoint_camera.camera_center
@@ -33,24 +68,24 @@ def generate_neural_gaussians(viewpoint_camera, pc : GaussianModel, visible_mask
     # view
     ob_view = ob_view / ob_dist
 
-    ## view-adaptive feature
-    if pc.use_feat_bank:
-        cat_view = torch.cat([ob_view, ob_dist], dim=1)
+    # ## view-adaptive feature
+    # if pc.use_feat_bank:
+    #     cat_view = torch.cat([ob_view, ob_dist], dim=1)
         
-        bank_weight = pc.get_featurebank_mlp(cat_view).unsqueeze(dim=1) # [n, 1, 3]
+    #     bank_weight = pc.get_featurebank_mlp(cat_view).unsqueeze(dim=1) # [n, 1, 3]
 
-        ## multi-resolution feat
-        feat = feat.unsqueeze(dim=-1)
-        feat = feat[:,::4, :1].repeat([1,4,1])*bank_weight[:,:,:1] + \
-            feat[:,::2, :1].repeat([1,2,1])*bank_weight[:,:,1:2] + \
-            feat[:,::1, :1]*bank_weight[:,:,2:]
-        feat = feat.squeeze(dim=-1) # [n, c]
-
+    #     ## multi-resolution feat
+    #     feat = feat.unsqueeze(dim=-1)
+    #     feat = feat[:,::4, :1].repeat([1,4,1])*bank_weight[:,:,:1] + \
+    #         feat[:,::2, :1].repeat([1,2,1])*bank_weight[:,:,1:2] + \
+    #         feat[:,::1, :1]*bank_weight[:,:,2:]
+    #     feat = feat.squeeze(dim=-1) # [n, c]
 
     cat_local_view = torch.cat([feat, ob_view, ob_dist], dim=1) # [N, c+3+1]
     cat_local_view_wodist = torch.cat([feat, ob_view], dim=1) # [N, c+3]
     if pc.appearance_dim > 0:
         camera_indicies = torch.ones_like(cat_local_view[:,0], dtype=torch.long, device=ob_dist.device) * viewpoint_camera.uid
+        # camera_indicies = torch.ones_like(cat_local_view[:,0], dtype=torch.long, device=ob_dist.device) * viewpoint_camera.idx
         # camera_indicies = torch.ones_like(cat_local_view[:,0], dtype=torch.long, device=ob_dist.device) * 10
         appearance = pc.get_appearance(camera_indicies)
 
@@ -77,7 +112,7 @@ def generate_neural_gaussians(viewpoint_camera, pc : GaussianModel, visible_mask
     else:
         if pc.add_color_dist:
             color = pc.get_color_mlp(cat_local_view)
-        else:
+        else: # pc.add_color_dist = False
             color = pc.get_color_mlp(cat_local_view_wodist)
     color = color.reshape([anchor.shape[0]*pc.n_offsets, 3])# [mask]
 

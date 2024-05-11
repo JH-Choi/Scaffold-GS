@@ -23,6 +23,7 @@ from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation
 from scene.embedding import Embedding
 import trimesh
+import frnn
 import pdb
 
     
@@ -271,6 +272,19 @@ class GaussianModel:
 
         # points = self.voxelize_sample(points, voxel_size=self.voxel_size)
         fused_point_cloud = torch.tensor(np.asarray(points)).float().cuda()
+
+        ## KNN
+        _, _, _, self.grid = frnn.frnn_grid_points(
+            fused_point_cloud.unsqueeze(0), 
+            fused_point_cloud.unsqueeze(0),  
+            None, None, 
+            K=32, 
+            r=100.0, # self.voxel_size
+            grid=None, 
+            return_nn=False,
+            return_sorted=False
+        )
+
         offsets = torch.zeros((fused_point_cloud.shape[0], self.n_offsets, 3)).float().cuda()
         anchors_feat = torch.zeros((fused_point_cloud.shape[0], self.feat_dim)).float().cuda()
         
@@ -291,6 +305,31 @@ class GaussianModel:
         self._rotation = nn.Parameter(rots.requires_grad_(False))
         self._opacity = nn.Parameter(opacities.requires_grad_(False))
         self.max_radii2D = torch.zeros((self.get_anchor.shape[0]), device="cuda")
+
+        ## KNN
+        # K: number of nearest neighbour considered
+        # indicator_vector: (N,3) learnable indicator vector of each vertex
+        # indicator_weight: weights of indicator vector influence
+        K = 8 
+        dis, indices, _, _ = frnn.frnn_grid_points(
+            self._anchor.unsqueeze(0), 
+            self._anchor.unsqueeze(0),
+            None, 
+            None, 
+            K = K, 
+            r = 100, # voxel_size?
+            grid=self.grid,
+            return_nn=False,
+            return_sorted=True,
+        )  # (1,M,K)
+        dis, indices = dis.detach(), indices.detach()
+        dis = dis.sqrt()
+        weights = 1 / (dis + 1e-7)
+        weights = weights / torch.sum(weights, dim=-1, keepdims=True)  # (1,M,K)
+        self.indices = indices.squeeze(0)  # (M, K)
+        self.weights = weights.squeeze(0)  # (M, K)
+        # indices: (N,K) the vertex indices of nearest K neighbours
+        # weights: (N,K) the weights(inverse distance) of K nearest neighbours
     
     def voxelize_sample(self, data=None, voxel_size=0.01):
         np.random.shuffle(data)
@@ -525,6 +564,25 @@ class GaussianModel:
         self._scaling = nn.Parameter(torch.tensor(scales, dtype=torch.float, device="cuda").requires_grad_(True))
         self._rotation = nn.Parameter(torch.tensor(rots, dtype=torch.float, device="cuda").requires_grad_(True))
 
+        ## KNN
+        K = 8 
+        dis, indices, _, _ = frnn.frnn_grid_points(
+            self._anchor.unsqueeze(0), 
+            self._anchor.unsqueeze(0),
+            None, 
+            None, 
+            K = K, 
+            r = 100, # voxel_size?
+            grid=None, # self.grid
+            return_nn=False,
+            return_sorted=True,
+        )  # (1,M,K)
+        dis, indices = dis.detach(), indices.detach()
+        dis = dis.sqrt()
+        weights = 1 / (dis + 1e-7)
+        weights = weights / torch.sum(weights, dim=-1, keepdims=True)  # (1,M,K)
+        self.indices = indices.squeeze(0)  # (M, K)
+        self.weights = weights.squeeze(0)  # (M, K)
 
     def replace_tensor_to_optimizer(self, tensor, name):
         optimizable_tensors = {}
@@ -591,8 +649,6 @@ class GaussianModel:
         grad_norm = torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
         self.offset_gradient_accum[combined_mask] += grad_norm
         self.offset_denom[combined_mask] += 1
-
-        
 
         
     def _prune_anchor_optimizer(self, mask):
@@ -740,7 +796,7 @@ class GaussianModel:
                 self._offset = optimizable_tensors["offset"]
                 self._opacity = optimizable_tensors["opacity"]
                 
-
+        
 
     def adjust_anchor(self, check_interval=100, success_threshold=0.8, grad_threshold=0.0002, min_opacity=0.005):
         # # adding anchors
@@ -764,7 +820,7 @@ class GaussianModel:
                                            device=self.offset_gradient_accum.device)
         self.offset_gradient_accum = torch.cat([self.offset_gradient_accum, padding_offset_gradient_accum], dim=0)
         
-        # # prune anchors
+        # prune anchors
         prune_mask = (self.opacity_accum < min_opacity*self.anchor_demon).squeeze(dim=1)
         anchors_mask = (self.anchor_demon > check_interval*success_threshold).squeeze(dim=1) # [N, 1]
         prune_mask = torch.logical_and(prune_mask, anchors_mask) # [N] 
@@ -797,6 +853,28 @@ class GaussianModel:
             self.prune_anchor(prune_mask)
         
         self.max_radii2D = torch.zeros((self.get_anchor.shape[0]), device="cuda")
+
+        ### Run anchor
+        ### KNN
+        K = 8 
+        dis, indices, _, _ = frnn.frnn_grid_points(
+            self._anchor.unsqueeze(0), 
+            self._anchor.unsqueeze(0),
+            None, 
+            None, 
+            K = K, 
+            r = 100, # voxel_size?
+            grid=None, # self.grid
+            return_nn=False,
+            return_sorted=True,
+        )  # (1,M,K)
+        dis, indices = dis.detach(), indices.detach()
+        dis = dis.sqrt()
+        weights = 1 / (dis + 1e-7)
+        weights = weights / torch.sum(weights, dim=-1, keepdims=True)  # (1,M,K)
+        self.indices = indices.squeeze(0)  # (M, K)
+        self.weights = weights.squeeze(0)  # (M, K)
+ 
 
     def save_mlp_checkpoints(self, path, mode = 'split'):#split or unite
         mkdir_p(os.path.dirname(path))
