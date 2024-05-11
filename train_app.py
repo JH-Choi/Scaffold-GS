@@ -34,7 +34,6 @@ import lpips
 from random import randint
 from utils.loss_utils import l1_loss, ssim
 from utils.general_utils import PILtoTorch
-from gaussian_renderer import prefilter_voxel, render, network_gui
 import sys
 from scene import Scene
 from utils.general_utils import safe_state, saveRuntimeCode
@@ -568,18 +567,18 @@ if __name__ == "__main__":
     # Initialize system state (RNG)
     safe_state(args.quiet)
 
-    # Start GUI server, configure and run training
-    network_gui.init(args.ip, args.port)
-    torch.autograd.set_detect_anomaly(args.detect_anomaly)
-
     lp_extract = lp.extract(args)
-
     if args.model_name == 'VastScaffoldMeshGS':
         from scene.vast_gaussian_model import GaussianModel
+        from gaussian_renderer import prefilter_voxel, render, network_gui
         gaussians = GaussianModel(lp_extract.feat_dim, lp_extract.n_offsets, lp_extract.voxel_size, lp_extract.update_depth, \
                                 lp_extract.update_init_factor, lp_extract.update_hierachy_factor, lp_extract.use_feat_bank, \
                                 lp_extract.appearance_dim, lp_extract.ratio, lp_extract.add_opacity_dist, lp_extract.add_cov_dist,\
                                 lp_extract.add_color_dist, lp_extract.meshes, lp_extract.dist_threshold)
+
+    # Start GUI server, configure and run training
+    network_gui.init(args.ip, args.port)
+    torch.autograd.set_detect_anomaly(args.detect_anomaly)
 
     if args.warmup:
         logger.info("\n Warmup finished! Reboot from last checkpoints")
@@ -588,7 +587,28 @@ if __name__ == "__main__":
     else:
         scene = Scene(lp_extract, gaussians, ply_path=None, shuffle=False)
 
+    ### Set appearance code for each camera
+    trainCameras, testCameras = scene.getTrainCameras().copy(), scene.getTestCameras().copy()
+    allCameras = trainCameras + testCameras
+    file_names = []
+    for idx, camera in enumerate(allCameras):
+        file_names.append(os.path.basename(camera.image_path))
+
+    if args.data_type == "Mega" or args.data_type == "MegaMesh":
+        sorted_indices = sorted(list(range(len(file_names))), key=lambda i: file_names[i])
+    elif args.data_type == "Okutama" or args.data_type == "OkutamaMesh":
+        sorted_filenames_with_index = sorted(enumerate(file_names), key=lambda x: (x[1][:-8], int(x[1].split("_")[-1].split(".")[0][-4:])))
+        sorted_indices = [index for index, _ in sorted_filenames_with_index]
+    else:
+        raise NotImplementedError("Okutama dataset not implemented")
+    # sorted_files = [file_names[i] for i in sorted_indices] # debug
+    tot_cameras = scene.getTrainCameras() + scene.getTestCameras()
+    for idx, s_idx in enumerate(sorted_indices):
+        tot_cameras[s_idx].idx = idx
+    ####
+
     # training
+    scene.gaussians.train()
     training(lp_extract, op.extract(args), pp.extract(args), dataset, gaussians, scene, args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, wandb, logger)
 
     # All done
