@@ -217,7 +217,11 @@ __global__ void computeCov2DCUDA(int P,
 	const float dcoef_db = dL_ddet0 * (-2. * cov2D[0][1]) + dL_ddet1 * (-2. * cov2D[0][1]);
 	const float dcoef_dc = dL_ddet0 * cov2D[0][0] + dL_ddet1 * (cov2D[0][0] + kernel_size);
 	
+
 	// Use helper variables for 2D covariance entries. More compact.
+	// float a = cov2D[0][0] += 0.3f;
+	// float b = cov2D[0][1];
+	// float c = cov2D[1][1] += 0.3f;
 	float a = cov2D[0][0] += kernel_size;
 	float b = cov2D[0][1];
 	float c = cov2D[1][1] += kernel_size;
@@ -471,9 +475,6 @@ renderCUDA(
 	if (inside){
 		pixf.x += subpixel_offset[pix_id].x;
 		pixf.y += subpixel_offset[pix_id].y;
-		// if (pix_id == 0){
-		// 	printf("\n\n in backward rendering, pixf is %.5f %.5f  offset %.5f %.5f\n\n", pixf.x, pixf.y, subpixel_offset[pix_id].x, subpixel_offset[pix_id].y);
-		// }
 	}
 
 	__shared__ int collected_id[BLOCK_SIZE];

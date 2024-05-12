@@ -83,26 +83,6 @@ def training(dataset, opt, pipe, dataset_name, gaussians, scene, testing_iterati
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
 
-    ### Set appearance code for each camera
-    trainCameras, testCameras = scene.getTrainCameras().copy(), scene.getTestCameras().copy()
-    allCameras = trainCameras + testCameras
-    file_names = []
-    for idx, camera in enumerate(allCameras):
-        file_names.append(os.path.basename(camera.image_path))
-
-    if args.data_type == "Mega" or args.data_type == "MegaMesh":
-        sorted_indices = sorted(list(range(len(file_names))), key=lambda i: file_names[i])
-    elif args.data_type == "Okutama" or args.data_type == "OkutamaMesh":
-        sorted_filenames_with_index = sorted(enumerate(file_names), key=lambda x: (x[1][:-8], int(x[1].split("_")[-1].split(".")[0][-4:])))
-        sorted_indices = [index for index, _ in sorted_filenames_with_index]
-    else:
-        raise NotImplementedError("Okutama dataset not implemented")
-    # sorted_files = [file_names[i] for i in sorted_indices] # debug
-    tot_cameras = scene.getTrainCameras() + scene.getTestCameras()
-    for idx, s_idx in enumerate(sorted_indices):
-        tot_cameras[s_idx].idx = idx
-    ####
-
     gaussians.training_setup(opt)
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
@@ -617,6 +597,26 @@ if __name__ == "__main__":
 
     if args.model_name == 'ScaffoldMeshGSwEncoding':
         gaussians.update_anchor_bound()
+
+    ### Set appearance code for each camera
+    trainCameras, testCameras = scene.getTrainCameras().copy(), scene.getTestCameras().copy()
+    allCameras = trainCameras + testCameras
+    file_names = []
+    for idx, camera in enumerate(allCameras):
+        file_names.append(os.path.basename(camera.image_path))
+
+    if args.data_type == "Mega" or args.data_type == "MegaMesh":
+        sorted_indices = sorted(list(range(len(file_names))), key=lambda i: file_names[i])
+    elif args.data_type == "Okutama" or args.data_type == "OkutamaMesh":
+        sorted_filenames_with_index = sorted(enumerate(file_names), key=lambda x: (x[1][:-8], int(x[1].split("_")[-1].split(".")[0][-4:])))
+        sorted_indices = [index for index, _ in sorted_filenames_with_index]
+    else:
+        raise NotImplementedError("Okutama dataset not implemented")
+    # sorted_files = [file_names[i] for i in sorted_indices] # debug
+    tot_cameras = scene.getTrainCameras() + scene.getTestCameras()
+    for idx, s_idx in enumerate(sorted_indices):
+        tot_cameras[s_idx].idx = idx
+    ####
 
     # training
     scene.gaussians.train()

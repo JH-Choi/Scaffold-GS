@@ -47,6 +47,8 @@ class Scene:
             scene_info = sceneLoadTypeCallbacks["Mega"](args.source_path, args.split_folder, args.eval)
         elif args.data_type == 'MegaMesh':
             scene_info = sceneLoadTypeCallbacks["MegaMesh"](args.source_path, args.split_folder, args.eval)
+        elif args.data_type == 'MegaMeshMulti':
+            scene_info = sceneLoadTypeCallbacks["MegaMeshMulti"](args.source_path, args.split_folder, args.eval)
         elif args.data_type == 'Okutama':
              scene_info = sceneLoadTypeCallbacks["Okutama"](args.source_path, args.images, args.eval)
         elif args.data_type == 'OkutamaMesh':

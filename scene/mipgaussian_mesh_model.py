@@ -249,7 +249,7 @@ class GaussianModel:
     def compute_3D_filter(self, cameras):
         print("Computing 3D filter")
         #TODO consider focal length and image width
-        xyz = self.get_xyz
+        xyz = self.get_anchor
         distance = torch.ones((xyz.shape[0]), device=xyz.device) * 100000.0
         valid_points = torch.zeros((xyz.shape[0]), device=xyz.device, dtype=torch.bool)
         

@@ -84,26 +84,6 @@ def training(dataset, opt, pipe, dataset_name, gaussians, scene, testing_iterati
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
 
-    ### Set appearance code for each camera
-    trainCameras, testCameras = scene.getTrainCameras().copy(), scene.getTestCameras().copy()
-    allCameras = trainCameras + testCameras
-    file_names = []
-    for idx, camera in enumerate(allCameras):
-        file_names.append(os.path.basename(camera.image_path))
-
-    if args.data_type == "Mega" or args.data_type == "MegaMesh":
-        sorted_indices = sorted(list(range(len(file_names))), key=lambda i: file_names[i])
-    elif args.data_type == "Okutama" or args.data_type == "OkutamaMesh":
-        sorted_filenames_with_index = sorted(enumerate(file_names), key=lambda x: (x[1][:-8], int(x[1].split("_")[-1].split(".")[0][-4:])))
-        sorted_indices = [index for index, _ in sorted_filenames_with_index]
-    else:
-        raise NotImplementedError("Okutama dataset not implemented")
-    # sorted_files = [file_names[i] for i in sorted_indices] # debug
-    tot_cameras = scene.getTrainCameras() + scene.getTestCameras()
-    for idx, s_idx in enumerate(sorted_indices):
-        tot_cameras[s_idx].idx = idx
-    ####
-
     gaussians.training_setup(opt)
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
@@ -114,6 +94,17 @@ def training(dataset, opt, pipe, dataset_name, gaussians, scene, testing_iterati
 
     iter_start = torch.cuda.Event(enable_timing = True)
     iter_end = torch.cuda.Event(enable_timing = True)
+
+    trainCameras = scene.getTrainCameras().copy()
+    # testCameras = scene.getTestCameras().copy()
+    # allCameras = trainCameras + testCameras
+
+    # # highresolution index
+    # highresolution_index = []
+    # for index, camera in enumerate(trainCameras):
+    #     if camera.image_width >= 800:
+    #         highresolution_index.append(index)
+    gaussians.compute_3D_filter(cameras=trainCameras)
 
     viewpoint_stack = None
     ema_loss_for_log = 0.0
@@ -153,10 +144,10 @@ def training(dataset, opt, pipe, dataset_name, gaussians, scene, testing_iterati
         if (iteration - 1) == debug_from:
             pipe.debug = True
         
-        voxel_visible_mask = prefilter_voxel(viewpoint_cam, gaussians, pipe,background)
-        retain_grad = (iteration < opt.update_until and iteration >= 0)
         subpixel_offset = None
         kernel_size = 0.1
+        voxel_visible_mask = prefilter_voxel(viewpoint_cam, gaussians, pipe,background, kernel_size=kernel_size, subpixel_offset=subpixel_offset)
+        retain_grad = (iteration < opt.update_until and iteration >= 0)
         render_pkg = render(viewpoint_cam, gaussians, pipe, background, kernel_size=kernel_size, visible_mask=voxel_visible_mask, \
                             retain_grad=retain_grad, subpixel_offset=subpixel_offset)
         
@@ -169,6 +160,7 @@ def training(dataset, opt, pipe, dataset_name, gaussians, scene, testing_iterati
         ssim_loss = (1.0 - ssim(image, gt_image))
         scaling_reg = scaling.prod(dim=1).mean()
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * ssim_loss + 0.01*scaling_reg
+        # loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * ssim_loss 
 
         loss.backward()
         
@@ -206,6 +198,8 @@ def training(dataset, opt, pipe, dataset_name, gaussians, scene, testing_iterati
                                             success_threshold=opt.success_threshold, 
                                             grad_threshold=opt.densify_grad_threshold, 
                                             min_opacity=opt.min_opacity)
+                    gaussians.compute_3D_filter(cameras=trainCameras)
+
             elif iteration == opt.update_until:
                 del gaussians.opacity_accum
                 del gaussians.offset_gradient_accum
@@ -327,9 +321,13 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
         
         torch.cuda.synchronize();t_start = time.time()
-        
-        voxel_visible_mask = prefilter_voxel(view, gaussians, pipeline, background)
-        render_pkg = render(view, gaussians, pipeline, background, visible_mask=voxel_visible_mask)
+
+        subpixel_offset = None
+        kernel_size = 0.1
+        voxel_visible_mask = prefilter_voxel(view, gaussians, pipeline, background, kernel_size=kernel_size, subpixel_offset=subpixel_offset)
+        render_pkg = render(view, gaussians, pipeline, background, kernel_size=kernel_size, \
+                            visible_mask=voxel_visible_mask, subpixel_offset=subpixel_offset)
+
         torch.cuda.synchronize();t_end = time.time()
 
         t_list.append(t_end - t_start)
@@ -572,7 +570,7 @@ if __name__ == "__main__":
     safe_state(args.quiet)
 
     lp_extract = lp.extract(args)
-    if args.model_name == 'ScaffoldMipMeshGS':
+    if args.model_name == 'ScaffoldMeshMipGS':
         from scene.mipgaussian_mesh_model import GaussianModel
         from gaussian_renderer import network_gui
         from gaussian_renderer.mip import prefilter_voxel, render
@@ -593,6 +591,28 @@ if __name__ == "__main__":
     else:
         scene = Scene(lp_extract, gaussians, ply_path=None, shuffle=False)
         # scene = Scene(lp_extract, gaussians, load_iteration=-1, ply_path=None, shuffle=False) # TODO
+
+    ### Set appearance code for each camera
+    trainCameras, testCameras = scene.getTrainCameras().copy(), scene.getTestCameras().copy()
+    allCameras = trainCameras + testCameras
+    file_names = []
+    for idx, camera in enumerate(allCameras):
+        file_names.append(os.path.basename(camera.image_path))
+
+    # if args.data_type == "Mega" or args.data_type == "MegaMesh":
+    if "Mega" in args.data_type:
+        sorted_indices = sorted(list(range(len(file_names))), key=lambda i: file_names[i])
+    # elif args.data_type == "Okutama" or args.data_type == "OkutamaMesh":
+    elif "Okutama" in args.data_type:
+        sorted_filenames_with_index = sorted(enumerate(file_names), key=lambda x: (x[1][:-8], int(x[1].split("_")[-1].split(".")[0][-4:])))
+        sorted_indices = [index for index, _ in sorted_filenames_with_index]
+    else:
+        raise NotImplementedError("Okutama dataset not implemented")
+    # sorted_files = [file_names[i] for i in sorted_indices] # debug
+    tot_cameras = scene.getTrainCameras() + scene.getTestCameras()
+    for idx, s_idx in enumerate(sorted_indices):
+        tot_cameras[s_idx].idx = idx
+    ####
 
     # training
     scene.gaussians.train()

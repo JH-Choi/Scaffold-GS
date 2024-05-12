@@ -770,7 +770,6 @@ class GaussianModel:
                     "offset": new_offsets,
                     "opacity": new_opacities,
                 }
-                
 
                 temp_anchor_demon = torch.cat([self.anchor_demon, torch.zeros([new_opacities.shape[0], 1], device='cuda').float()], dim=0)
                 del self.anchor_demon
@@ -900,12 +899,13 @@ class GaussianModel:
                     'opacity_mlp': self.mlp_opacity.state_dict(),
                     'cov_mlp': self.mlp_cov.state_dict(),
                     'color_mlp': self.mlp_color.state_dict(),
+                    'encoder_dir': self.encoder_dir.state_dict()
                     }, os.path.join(path, 'checkpoints.pth'))
         else:
             raise NotImplementedError
 
 
-    def load_mlp_checkpoints(self, path, mode = 'split'):#split or unite
+    def load_mlp_checkpoints(self, path, mode = 'unite'):#split or unite
         if mode == 'split':
             self.mlp_opacity = torch.jit.load(os.path.join(path, 'opacity_mlp.pt')).cuda()
             self.mlp_cov = torch.jit.load(os.path.join(path, 'cov_mlp.pt')).cuda()

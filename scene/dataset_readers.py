@@ -31,6 +31,7 @@ from utils.sh_utils import SH2RGB
 from scene.gaussian_model import BasicPointCloud
 import trimesh
 import cv2
+import pdb
 
 
 class CameraInfo(NamedTuple):
@@ -139,6 +140,72 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder, ds_type=Non
         cam_infos.append(cam_info)
     sys.stdout.write('\n')
     return cam_infos
+
+def readColmapMultiCameras(cam_extrinsics, cam_intrinsics, images_folder, ds_type=None):
+    '''
+    readColmapCameras for multi-scale dataset
+    '''
+    # resolutions = [2, 4, 8] # 1, 2, 4, 8 
+    resolutions = [4] # 1, 2, 4, 8 
+
+    cam_infos = []
+    for idx, key in enumerate(cam_extrinsics):
+        sys.stdout.write('\r')
+        # the exact output you're looking for:
+        sys.stdout.write("Reading camera {}/{}".format(idx+1, len(cam_extrinsics)))
+        sys.stdout.flush()
+
+        extr = cam_extrinsics[key]
+        intr = cam_intrinsics[extr.camera_id]
+        height = intr.height
+        width = intr.width
+
+        uid = intr.id
+        R = np.transpose(qvec2rotmat(extr.qvec))
+        T = np.array(extr.tvec)
+
+        for res in resolutions:
+            # intr.model=="PINHOLE":
+            if intr.model=="SIMPLE_PINHOLE" or intr.model == "SIMPLE_RADIAL":
+                focal_length_x = intr.params[0]
+                FovY = focal2fov(focal_length_x, height)
+                FovX = focal2fov(focal_length_x, width)
+            elif intr.model=="PINHOLE":
+                focal_length_x = intr.params[0] # 745.3878
+                focal_length_y = intr.params[1] # 745.3878
+                FovY = focal2fov(focal_length_y, height)
+                FovX = focal2fov(focal_length_x, width)
+            else:
+                assert False, "Colmap camera model not handled: only undistorted datasets (PINHOLE or SIMPLE_PINHOLE cameras) supported!"
+            
+            # print(f'FovX: {FovX}, FovY: {FovY}')
+            if ds_type == 'Mega':
+                image_path = os.path.join(images_folder, extr.name)
+            else:
+                image_path = os.path.join(images_folder, os.path.basename(extr.name))
+
+            if res == 1:
+                image_path.replace('rgbs_4', 'rgbs')
+            elif res == 2:
+                image_path.replace('rgbs_4', 'rgbs_2')
+            elif res == 4:
+                pass
+            elif res == 8:
+                image_path.replace('rgbs_4', 'rgbs_8')
+            
+            width, height = int(width * (4 / res)), int(height * (4 / res))
+
+            image_name = os.path.basename(image_path).split(".")[0]
+            # image = Image.open(image_path)
+            # print(f'image: {image.size}')
+            cam_info = CameraInfo2(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, 
+                                image_path=image_path, image_name=image_name, width=width, height=height)
+            # cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
+            #                       image_path=image_path, image_name=image_name, width=width, height=height)
+            cam_infos.append(cam_info)
+    sys.stdout.write('\n')
+    return cam_infos
+
 
 def fetchPly(path):
     plydata = PlyData.read(path)
@@ -301,8 +368,8 @@ def readColmapMeshMegaSceneInfo(path, split_folder, eval):
     cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
 
     if eval:
-        # train_cam_infos = [c for c in cam_infos if c.image_path.split('/')[-3] == "train"]
-        train_cam_infos = cam_infos
+        train_cam_infos = [c for c in cam_infos if c.image_path.split('/')[-3] == "train"]
+        # train_cam_infos = cam_infos
         test_cam_infos = [c for c in cam_infos if c.image_path.split('/')[-3] == "val"]
     else:
         train_cam_infos = cam_infos
@@ -336,6 +403,46 @@ def readColmapMeshMegaSceneInfo(path, split_folder, eval):
     #                     nerf_normalization=nerf_normalization,
     #                     ply_path=ply_path)
     return scene_info
+
+def readColmapMeshMegaMultiSceneInfo(path, split_folder, eval):
+    if split_folder == "":
+        folder_name = "colmap_aligned"
+    else:
+        folder_name = split_folder # "colmap_aligned/0"
+
+    try:
+        cameras_extrinsic_file = os.path.join(path, folder_name, "images.bin")
+        cameras_intrinsic_file = os.path.join(path, folder_name, "cameras.bin")
+        cam_extrinsics = read_extrinsics_binary(cameras_extrinsic_file)
+        cam_intrinsics = read_intrinsics_binary(cameras_intrinsic_file)
+    except:
+        cameras_extrinsic_file = os.path.join(path, folder_name, "images.txt")
+        cameras_intrinsic_file = os.path.join(path, folder_name, "cameras.txt")
+        cam_extrinsics = read_extrinsics_text(cameras_extrinsic_file)
+        cam_intrinsics = read_intrinsics_text(cameras_intrinsic_file)
+    
+    cam_infos_unsorted = readColmapMultiCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, images_folder=path, ds_type='Mega')
+    cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
+
+    if eval:
+        train_cam_infos = [c for c in cam_infos if c.image_path.split('/')[-3] == "train"]
+        # train_cam_infos = cam_infos
+        test_cam_infos = [c for c in cam_infos if c.image_path.split('/')[-3] == "val"]
+    else:
+        train_cam_infos = cam_infos
+        test_cam_infos = []
+    
+    # assert len(cam_infos) == len(train_cam_infos) + len(test_cam_infos)
+
+    nerf_normalization = getNerfppNorm(train_cam_infos)
+
+    scene_info = SceneInfo2(train_cameras=train_cam_infos,
+                           test_cameras=test_cam_infos,
+                           nerf_normalization=nerf_normalization)
+
+    return scene_info
+
+
 
 def readColmapOkutamaSceneInfo(path, images, eval, llffhold=8):
     folder_name = "colmap_aligned"
@@ -546,6 +653,7 @@ sceneLoadTypeCallbacks = {
     "Colmap": readColmapSceneInfo,
     "Mega": readColmapMegaSceneInfo,
     "MegaMesh": readColmapMeshMegaSceneInfo,
+    "MegaMeshMulti": readColmapMeshMegaMultiSceneInfo,
     "Okutama": readColmapOkutamaSceneInfo,
     "OkutamaMesh":readColmapMeshOkutamaSceneInfo,
     "Blender": readNerfSyntheticInfo,

@@ -21,10 +21,11 @@ def generate_neural_gaussians(viewpoint_camera, pc : GaussianModel, visible_mask
     if visible_mask is None:
         visible_mask = torch.ones(pc.get_anchor.shape[0], dtype=torch.bool, device = pc.get_anchor.device)
     
-    feat = pc._anchor_feat[visible_mask]
+    feat = pc._anchor_feat[visible_mask] # N, 32
     anchor = pc.get_anchor[visible_mask]
     grid_offsets = pc._offset[visible_mask]
     grid_scaling = pc.get_scaling[visible_mask]
+    filter_3D = pc.filter_3D[visible_mask] # N, 1
 
     ## get view properties for anchor
     ob_view = anchor - viewpoint_camera.camera_center
@@ -92,14 +93,28 @@ def generate_neural_gaussians(viewpoint_camera, pc : GaussianModel, visible_mask
     offsets = grid_offsets.view([-1, 3]) # [mask]
     
     # combine for parallel masking
-    concatenated = torch.cat([grid_scaling, anchor], dim=-1)
+    # concatenated = torch.cat([grid_scaling, anchor], dim=-1)
+    concatenated = torch.cat([grid_scaling, anchor, filter_3D], dim=-1)
     concatenated_repeated = repeat(concatenated, 'n (c) -> (n k) (c)', k=pc.n_offsets)
     concatenated_all = torch.cat([concatenated_repeated, color, scale_rot, offsets], dim=-1)
     masked = concatenated_all[mask]
-    scaling_repeat, repeat_anchor, color, scale_rot, offsets = masked.split([6, 3, 3, 7, 3], dim=-1)
+    scaling_repeat, repeat_anchor, repeat_filter3D, color, scale_rot, offsets = masked.split([6, 3, 1, 3, 7, 3], dim=-1)
     
     # post-process cov
     scaling = scaling_repeat[:,3:] * torch.sigmoid(scale_rot[:,:3]) # * (1+torch.sigmoid(repeat_dist))
+
+    # mip
+    scaling_mip = torch.square(scaling) + torch.square(repeat_filter3D)
+    scaling_mip = torch.sqrt(scaling_mip)
+
+    scales_square = torch.square(scaling)
+    det1 = scales_square.prod(dim=1)
+    scales_after_square = scales_square + torch.square(repeat_filter3D) 
+    det2 = scales_after_square.prod(dim=1) 
+    coef = torch.sqrt(det1 / det2)
+    opacity_mip = opacity * coef[..., None]
+    #mip
+
     rot = pc.rotation_activation(scale_rot[:,3:7])
     
     # post-process offsets to get centers for gaussians
@@ -107,11 +122,14 @@ def generate_neural_gaussians(viewpoint_camera, pc : GaussianModel, visible_mask
     xyz = repeat_anchor + offsets
 
     if is_training:
-        return xyz, color, opacity, scaling, rot, neural_opacity, mask
+        # return xyz, color, opacity, scaling, rot, neural_opacity, mask
+        return xyz, color, opacity_mip, scaling_mip, rot, neural_opacity, mask
     else:
-        return xyz, color, opacity, scaling, rot
+        # return xyz, color, opacity, scaling, rot
+        return xyz, color, opacity_mip, scaling_mip, rot
 
-def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, visible_mask=None, retain_grad=False):
+def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, kernel_size: float, scaling_modifier = 1.0, \
+           visible_mask=None, retain_grad=False, subpixel_offset = None):
     """
     Render the scene. 
     
@@ -138,11 +156,16 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     tanfovx = math.tan(viewpoint_camera.FoVx * 0.5)
     tanfovy = math.tan(viewpoint_camera.FoVy * 0.5)
 
+    if subpixel_offset is None:
+        subpixel_offset = torch.zeros((int(viewpoint_camera.image_height), int(viewpoint_camera.image_width), 2), dtype=torch.float32, device="cuda")
+
     raster_settings = GaussianRasterizationSettings(
         image_height=int(viewpoint_camera.image_height),
         image_width=int(viewpoint_camera.image_width),
         tanfovx=tanfovx,
         tanfovy=tanfovy,
+        kernel_size=kernel_size,
+        subpixel_offset=subpixel_offset,
         bg=bg_color,
         scale_modifier=scaling_modifier,
         viewmatrix=viewpoint_camera.world_view_transform,
@@ -184,7 +207,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
                 }
 
 
-def prefilter_voxel(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None):
+def prefilter_voxel(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, kernel_size: float, scaling_modifier = 1.0, override_color = None, subpixel_offset = None):
     """
     Render the scene. 
     
@@ -201,11 +224,16 @@ def prefilter_voxel(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch
     tanfovx = math.tan(viewpoint_camera.FoVx * 0.5)
     tanfovy = math.tan(viewpoint_camera.FoVy * 0.5)
 
+    if subpixel_offset is None:
+        subpixel_offset = torch.zeros((int(viewpoint_camera.image_height), int(viewpoint_camera.image_width), 2), dtype=torch.float32, device="cuda")
+
     raster_settings = GaussianRasterizationSettings(
         image_height=int(viewpoint_camera.image_height),
         image_width=int(viewpoint_camera.image_width),
         tanfovx=tanfovx,
         tanfovy=tanfovy,
+        kernel_size=kernel_size,
+        subpixel_offset=subpixel_offset,
         bg=bg_color,
         scale_modifier=scaling_modifier,
         viewmatrix=viewpoint_camera.world_view_transform,

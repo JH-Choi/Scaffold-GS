@@ -37,7 +37,7 @@ namespace FORWARD
 		const int W, int H,
 		const float focal_x, float focal_y,
 		const float tan_fovx, float tan_fovy,
-		const float kernel_size,
+		const float kernel_size, 
 		int* radii,
 		float2* points_xy_image,
 		float* depths,
@@ -62,6 +62,22 @@ namespace FORWARD
 		uint32_t* n_contrib,
 		const float* bg_color,
 		float* out_color);
+	void filter_preprocess(int P, int M,
+		const float* means3D,
+		const glm::vec3* scales,
+		const float scale_modifier,
+		const glm::vec4* rotations,
+		const float* cov3D_precomp,
+		const float* viewmatrix,
+		const float* projmatrix,
+		const int W, int H,
+		const float focal_x, float focal_y,
+		const float tan_fovx, float tan_fovy,
+		const float kernel_size,
+		int* radii,
+		float* cov3Ds,
+		const dim3 grid,
+		bool prefiltered);
 }
 
 
