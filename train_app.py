@@ -599,9 +599,9 @@ if __name__ == "__main__":
     for idx, camera in enumerate(allCameras):
         file_names.append(os.path.basename(camera.image_path))
 
-    if args.data_type == "Mega" or args.data_type == "MegaMesh":
+    if "Mega" in args.data_type:
         sorted_indices = sorted(list(range(len(file_names))), key=lambda i: file_names[i])
-    elif args.data_type == "Okutama" or args.data_type == "OkutamaMesh":
+    elif "Okutama" in args.data_type:
         sorted_filenames_with_index = sorted(enumerate(file_names), key=lambda x: (x[1][:-8], int(x[1].split("_")[-1].split(".")[0][-4:])))
         sorted_indices = [index for index, _ in sorted_filenames_with_index]
     else:

@@ -17,6 +17,7 @@ from scene.dataset_readers import sceneLoadTypeCallbacks
 from scene.gaussian_model import GaussianModel
 from arguments import ModelParams
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
+import pdb
 
 class Scene:
 
@@ -103,7 +104,12 @@ class Scene:
                                                            "iteration_" + str(self.loaded_iter)))
         else:
             if len(args.meshes) != 0:
-                self.gaussians.create_from_meshes(args.num_splats, self.cameras_extent)
+                if args.model_name == 'ScaffoldMeshGSwOctree':
+                    self.gaussians.create_from_meshes(args.num_splats, self.cameras_extent, \
+                    cameras=self.train_cameras, dist_ratio=args.dist_ratio, \
+                    init_level=args.init_level, levels=args.levels)
+                else:
+                    self.gaussians.create_from_meshes(args.num_splats, self.cameras_extent)
             else:
                 self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
 

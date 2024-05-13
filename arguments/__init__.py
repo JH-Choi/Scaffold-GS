@@ -78,6 +78,16 @@ class ModelParams(ParamGroup):
 
         # Create from Meshes
         self.dist_threshold = 0.01
+
+        # OctreeGS
+        self.fork = 2
+        self.progressive = False
+        self.dist_ratio = 0.999 # 0.99/0.999
+        self.levels = -1 # -1(adaptive) or 0 ~ 
+        self.init_level = -1 # -1(adaptive) or 0 ~ levels-1
+        self.extra_ratio = 0.5
+        self.extra_up = 0.01
+
     
         # Colmap Model Split 
         self.split_folder = ""
@@ -157,6 +167,16 @@ class OptimizationParams(ParamGroup):
 
         self.percent_dense = 0.01
         self.lambda_dssim = 0.2
+
+        # Hash-NGP Encoding
+        self.encoding_xyz_lr_init = 0.005
+        self.encoding_xyz_lr_final = 0.00001
+        self.encoding_xyz_lr_delay_mult = 0.33
+        self.encoding_xyz_lr_max_steps = 30_000
+        self.mlp_grid_lr_init = 0.005
+        self.mlp_grid_lr_final = 0.00001
+        self.mlp_grid_lr_delay_mult = 0.01
+        self.mlp_grid_lr_max_steps = 30_000
         
         # for anchor densification
         self.start_stat = 500

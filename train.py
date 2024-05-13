@@ -582,6 +582,26 @@ if __name__ == "__main__":
                                 lp_extract.update_init_factor, lp_extract.update_hierachy_factor, lp_extract.use_feat_bank, \
                                 lp_extract.appearance_dim, lp_extract.ratio, lp_extract.add_opacity_dist, lp_extract.add_cov_dist,\
                                 lp_extract.add_color_dist, lp_extract.meshes, lp_extract.dist_threshold)   
+    elif args.model_name == 'ScaffoldMeshGSwOctree':
+        from scene.gaussian_mesh_octree import GaussianModel
+        from gaussian_renderer import network_gui
+        from gaussian_renderer.meshoctree import prefilter_voxel, render
+        global prefilter_voxel, render, network_gui
+        gaussians = GaussianModel(lp_extract.feat_dim, lp_extract.n_offsets, lp_extract.voxel_size, lp_extract.update_depth, \
+                                lp_extract.update_init_factor, lp_extract.update_hierachy_factor, lp_extract.use_feat_bank, \
+                                lp_extract.appearance_dim, lp_extract.ratio, lp_extract.add_opacity_dist, lp_extract.add_cov_dist,\
+                                lp_extract.add_color_dist, lp_extract.meshes, lp_extract.dist_threshold, \
+                                lp_extract.fork)   
+    elif args.model_name == 'ScaffoldMeshGSwNgp':
+        from scene.gaussian_mesh_ngp import GaussianModel
+        from gaussian_renderer import network_gui
+        from gaussian_renderer.meshngp import prefilter_voxel, render
+        global prefilter_voxel, render, network_gui
+        gaussians = GaussianModel(lp_extract.feat_dim, lp_extract.n_offsets, lp_extract.voxel_size, lp_extract.update_depth, \
+                                lp_extract.update_init_factor, lp_extract.update_hierachy_factor, lp_extract.use_feat_bank, \
+                                lp_extract.appearance_dim, lp_extract.ratio, lp_extract.add_opacity_dist, lp_extract.add_cov_dist,\
+                                lp_extract.add_color_dist, lp_extract.meshes, lp_extract.dist_threshold)   
+
 
     # Start GUI server, configure and run training
     network_gui.init(args.ip, args.port)
@@ -595,7 +615,7 @@ if __name__ == "__main__":
         scene = Scene(lp_extract, gaussians, ply_path=None, shuffle=False)
         # scene = Scene(lp_extract, gaussians, load_iteration=-1, ply_path=None, shuffle=False) # TODO
 
-    if args.model_name == 'ScaffoldMeshGSwEncoding':
+    if args.model_name == 'ScaffoldMeshGSwEncoding' or args.model_name == 'ScaffoldMeshGSwNgp':
         gaussians.update_anchor_bound()
 
     ### Set appearance code for each camera
@@ -605,9 +625,9 @@ if __name__ == "__main__":
     for idx, camera in enumerate(allCameras):
         file_names.append(os.path.basename(camera.image_path))
 
-    if args.data_type == "Mega" or args.data_type == "MegaMesh":
+    if "Mega" in args.data_type:
         sorted_indices = sorted(list(range(len(file_names))), key=lambda i: file_names[i])
-    elif args.data_type == "Okutama" or args.data_type == "OkutamaMesh":
+    elif "Okutama" in args.data_type:
         sorted_filenames_with_index = sorted(enumerate(file_names), key=lambda x: (x[1][:-8], int(x[1].split("_")[-1].split(".")[0][-4:])))
         sorted_indices = [index for index, _ in sorted_filenames_with_index]
     else:
